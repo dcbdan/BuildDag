@@ -5,7 +5,7 @@ module BuildDag.Build (
   elementwise, elementwiseAlpha,
   elementwiseBinary, elementwiseBinaryAlpha,
   dropout, add, subtract, hadamard,
-  initRandom, initConstant,
+  initInput, initRandom, initConstant,
   ----------------
   liftGraph, getObject
 ) where
@@ -110,6 +110,9 @@ _same_dim_binary op lhs rhs = do
 add      = _same_dim_binary Add
 hadamard = _same_dim_binary Mul
 subtract = _same_dim_binary Sub
+
+initInput :: String -> Init -> BuildDagM Id
+initInput = _input
 
 initRandom :: String -> Float -> Float -> BuildDagM Id
 initRandom name a b = _input name (InitRandom (min a b) (max a b))
