@@ -1,6 +1,5 @@
 module BuildDag.Dags(
-  module BuildDag.Dags.ChainMatMul,
-  parseDagArgs
+  parseDagArgs, dagUsage
 ) where
 
 import BuildDag.Dags.ChainMatMul
@@ -18,6 +17,15 @@ import Text.Read ( readMaybe )
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
+
+dagUsage :: [String]
+dagUsage = [
+    "amazonCat13K batchSize hiddenSize",
+    "bert batchSize",
+    "bert batchSize numLayers nQuery nHead nSequence",
+    "bert batchSize numLayers nQuery nHead nSequence dropout",
+    "matmul nI nJ nK                   [for ij,jk->ik]"
+  ]
 
 parseDagArgs :: String -> [String] -> Maybe Dag
 

@@ -1,6 +1,6 @@
 import System.Environment ( getProgName, getArgs )
 
-import BuildDag.Dags    ( parseDagArgs )
+import BuildDag.Dags    ( parseDagArgs, dagUsage )
 import BuildDag.ShowDag ( showDag )
 import BuildDag.Types   ( Dag )
 
@@ -17,7 +17,7 @@ main  = do
       putStrLn $ sepBy " " id args
       putStr   $ unlines $ showDag dag
 
-usage progName = ["Usage: " ++ progName ++ " DagName DagArgs"]
+usage progName = ["Usage: " ++ progName ++ " DagName DagArgs", ""] ++ dagUsage
 
 parseArgs :: [String] -> Maybe Dag
 parseArgs (dagIdentifier:dagArgs) =
