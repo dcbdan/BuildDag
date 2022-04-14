@@ -1,9 +1,9 @@
-module BuildDag.Dags.Module(
+module BuildDag.Module(
   Module(..), Name,
   initialize, buildForward,
   forward11, forward_1, forward1_, forward__,
   variablesMapping, modelSize,
-  linearModule, generalLinearModule,
+  rowMajorLinearModule, generalLinearModule,
   straightForward
 ) where
 
@@ -87,6 +87,10 @@ variablesMapping = variablesOf .> map fix .> Map.fromList
 modelSize :: Module a -> Int
 modelSize = variablesMapping .> Map.elems .> map product .> sum
 
+-- This is name rowMajorLinearModule and not linearModule as a reminder
+-- that the batch dimension i is in the leading dimension only for row major
+-- computations.
+--
 -- "ij,jk->ik"
 -- In this case,
 --   W is jk,
@@ -94,8 +98,8 @@ modelSize = variablesMapping .> Map.elems .> map product .> sum
 --   b is k
 -- and the computation is
 --   xW + b
-linearModule :: String -> Dim -> Dim -> Dim -> Module ()
-linearModule name nI nJ nK = Module name linearVars linearForward
+rowMajorLinearModule :: String -> Dim -> Dim -> Dim -> Module ()
+rowMajorLinearModule name nI nJ nK = Module name linearVars linearForward
   where
   linearVars = [
     Tensor "W" [nJ, nK] (InitRandom (-1.0) 1.0) (),

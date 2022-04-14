@@ -7,7 +7,7 @@ module BuildDag.Build (
   dropout, add, subtract, hadamard,
   initInput, initRandom, initConstant,
   ----------------
-  liftGraph, getObject
+  liftGraph, getObject, getOutputDims
 ) where
 
 import Prelude hiding ( subtract )
