@@ -2,7 +2,7 @@ module BuildDag.Kernel (
   getOutputDims, getIncidentDims, getAggRanks, getAggOp, getOrderings
 ) where
 
-import Data.IntSet ( IntSet, (\\) )
+import Data.IntSet ( IntSet, (\\), union )
 import qualified Data.IntSet as IntSet
 
 import Data.IntMap ( IntMap )
@@ -14,30 +14,55 @@ import BuildDag.Misc ( idxInterval )
 
 import Control.Monad.State ( State, execState, get, put )
 
-getAggInfo :: Kernel ->  Maybe (CastableBOp, IntSet)
-
-getAggInfo (KI_Contraction lhs rhs out _) |
+getIncOutRank :: Kernel -> (Int, Int)
+getIncOutRank (KI_Contraction lhs rhs out _) |
   not (checkContraction lhs rhs out) = error "invalid args on KI_Contraction"
-getAggInfo (KI_Contraction lhs rhs out _) =
-  let nJoined = 1 + maximum (lhs ++ rhs)
-      aggd    = joinedModes \\ outModes
-      joinedModes = IntSet.fromList (idxInterval nJoined)
-      outModes    = IntSet.fromList out
-   in Just (CastableAdd, aggd)
+getIncOutRank (KI_Contraction lhs rhs out _) =
+  let nInc = IntSet.size (lhsS `union` rhsS)
+      nOut = length out
+      lhsS = IntSet.fromList lhs
+      rhsS = IntSet.fromList rhs
+   in (nInc, nOut)
+getIncOutRank (KI_Reduction _ nInc out _) = (nInc, length out)
+getIncOutRank (KI_EW _ out _) = (n, n)
+  where n = length out
+getIncOutRank (KI_EWB _ lhs rhs out _ _) =
+  let nInc = IntSet.size (lhsS `union` rhsS)
+      nOut = length out
+      lhsS = IntSet.fromList lhs
+      rhsS = IntSet.fromList rhs
+   in if nInc /= nOut
+         then error "Invalid EWB"
+         else (nInc, nOut)
+getIncOutRank (KI_Dropout n _) = (n, n)
 
-getAggInfo (KI_Reduction op _ aggd _) = Just (op, aggd)
-getAggInfo (KI_EW _ _ _)       = Nothing
-getAggInfo (KI_EWB _ _ _ _ _ ) = Nothing
-getAggInfo (KI_Dropout _ _)    = Nothing
 
 -- Each kernel has an incident rank R and they are labeled
 --   [0,...,R-1].
 -- This function gets for each input the input labels
 getOrderings :: Kernel -> [[Rank]]
-getOrderings (KI_Contraction lhs rhs _ _) = [lhs, rhs]
-getOrderings (KI_Reduction _ n _ _) = [idxInterval n]
-getOrderings (KI_EW _ ret _) = [ret]
-getOrderings (KI_EWB _ lhs rhs _ _) = [lhs, rhs]
+
+getOrderings k@(KI_Contraction lhs rhs out _) | checkContraction lhs rhs out =
+  let aggd = IntSet.toList $ (lhsS `union` rhsS) \\ outS
+      lhsS = IntSet.fromList lhs
+      rhsS = IntSet.fromList rhs
+      outS = IntSet.fromList out
+      outModified = out ++ aggd
+   in getInputOrderings [lhs,rhs] outModified
+getOrderings (KI_Contraction _ _ _ _) = error "invalid KI_Contraction"
+
+getOrderings k@(KI_Reduction _ n outModes _) =
+  let aggd = IntSet.toList $ innS \\ outS
+      innS = IntSet.fromList $ idxInterval n
+      outS = IntSet.fromList outModes
+      outModified = outModes ++ aggd
+   in getInputOrderings [idxInterval n] outModified
+
+getOrderings (KI_EW _ outModes _) = getInputOrderings [idxInterval n] outModes
+  where n = length outModes
+
+getOrderings (KI_EWB _ lhs rhs out _ _) = getInputOrderings [lhs, rhs] out
+
 getOrderings (KI_Dropout n _) = [idxInterval n]
 
 -- Get the orderings of the inputs and use that to deduce
@@ -72,15 +97,17 @@ getOutputDims k ds =
       aggd = getAggRanks k
    in incToOut aggd inc
 
+-- The convention for KI_Contraction and KI_Reduction is to tag
+-- the agg modes on at the end. So
+--  ijk -> ik reduces to
+--  ikj    ij
 getAggRanks :: Kernel -> IntSet
 getAggRanks kernel =
-  case getAggInfo kernel of
-    Nothing       -> IntSet.empty
-    Just (_, ret) -> ret
+  let (nInc, nOut) = getIncOutRank kernel
+   in IntSet.fromList [nOut..(nInc-1)]
 
 getAggOp :: Kernel -> CastableBOp
-getAggOp kernel =
-  case getAggInfo kernel of
-    Nothing       -> error "This op has no associated agg"
-    Just (ret, _) -> ret
+getAggOp (KI_Contraction _ _ _ _) = CastableAdd
+getAggOp (KI_Reduction op _ _ _) = op
+getAggOp _ = error "This op has no associated agg"
 

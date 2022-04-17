@@ -50,14 +50,14 @@ contractionAlpha lhsModes rhsModes outModes alpha lhs rhs =
          rhsReblock <- _reblock rhs
          outJoin <- _join joinKernel [lhsReblock,rhsReblock]
          if IntSet.null (K.getAggRanks joinKernel)
-            then return outJoin
+            then error "This is not a contraction, this is an EWB with +."
             else _agg (K.getAggOp joinKernel) outJoin
 
 reduction         a b d   = reductionAlpha a b 1.0 d
 
-reductionAlpha :: CastableBOp -> IntSet -> Float -> Id -> BuildDagM Id
-reductionAlpha op aggd alpha inn =
-  let getReductionKernel rankIn = KI_Reduction op rankIn aggd alpha
+reductionAlpha :: CastableBOp -> [Int] -> Float -> Id -> BuildDagM Id
+reductionAlpha op outModes alpha inn =
+  let getReductionKernel rankIn = KI_Reduction op rankIn outModes alpha
    in do rankIn <- getOutputRank inn
          let reductionKernel = getReductionKernel rankIn
          innReblock <- _reblock inn
@@ -78,17 +78,17 @@ elementwiseAlpha op outModes alpha inn =
             then error "rankIn is incrrect size in EW"
             else _join joinKernel [inn]
 
-elementwiseBinary a b c f g = elementwiseBinaryAlpha a b c 1.0 1.0 f g
+elementwiseBinary a b c d g h = elementwiseBinaryAlpha a b c d 1.0 1.0 g h
 
 -- This op does not do an input reblocking or a post aggregation.
 elementwiseBinaryAlpha ::
   BOp ->
-  [Int] -> [Int] ->
+  [Int] -> [Int] -> [Int] ->
   Float -> Float ->
   Id -> Id ->
   BuildDagM Id
-elementwiseBinaryAlpha op lhsModes rhsModes alpha beta lhs rhs =
-  let kernel = KI_EWB op lhsModes rhsModes alpha beta
+elementwiseBinaryAlpha op lhsModes rhsModes outModes alpha beta lhs rhs =
+  let kernel = KI_EWB op lhsModes rhsModes outModes alpha beta
    in _join kernel [lhs, rhs]
 
 dropout :: Float -> Id -> BuildDagM Id
@@ -105,7 +105,7 @@ _same_dim_binary op lhs rhs = do
       interval = idxInterval (length lhsDims)
   if (lhsDims /= rhsDims)
      then error errMsg
-     else elementwiseBinary op interval interval lhs rhs
+     else elementwiseBinary op interval interval interval lhs rhs
 
 add      = _same_dim_binary Add
 hadamard = _same_dim_binary Mul

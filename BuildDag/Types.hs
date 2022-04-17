@@ -4,10 +4,10 @@ module BuildDag.Types(
   Kernel(..), Param(..),  Paramable(..),
   UOp(..), BOp(..), CastableBOp(..), Init(..),
   ---
-  checkContraction, incToOut, incToAgg
+  checkContraction, incToOut, incToAgg, getInputOrderings, checkOrderings
 ) where
 
-import Data.IntSet ( IntSet, (\\) )
+import Data.IntSet ( IntSet, (\\), unions )
 import qualified Data.IntSet as IntSet
 
 import Data.Map ( Map, (!) )
@@ -41,11 +41,11 @@ instance Paramable NodeInfo where
     f (Join kernel) = (Pi (whichKI kernel)):(paramable kernel)
     f (Reblock)     = [Pi 1]
     f (Agg op)      = (Pi 7):(paramable op)
-    whichKI (KI_Contraction  _ _ _ _  ) = 2
-    whichKI (KI_Reduction    _ _ _ _  ) = 3
-    whichKI (KI_EW           _ _ _    ) = 4
-    whichKI (KI_EWB          _ _ _ _ _) = 5
-    whichKI (KI_Dropout      _ _      ) = 6
+    whichKI (KI_Contraction  _ _ _ _    ) = 2
+    whichKI (KI_Reduction    _ _ _ _    ) = 3
+    whichKI (KI_EW           _ _ _      ) = 4
+    whichKI (KI_EWB          _ _ _ _ _ _) = 5
+    whichKI (KI_Dropout      _ _        ) = 6
 
 data Node = Node {
   _id      :: Id,
@@ -64,10 +64,38 @@ type BuildDagM = RWS
 
 data Kernel =
     KI_Contraction [Int] [Int] [Int] Float
-  | KI_Reduction CastableBOp Int IntSet Float
-  | KI_EW UOp [Int] Float
-  | KI_EWB BOp [Int] [Int] Float Float
-  | KI_Dropout Int Float
+    -- ^ This is an einstein formulation
+    --   KI_Contraction [0,1] [1,2] [0,3] 1.0 is matrix multiply
+
+  | KI_Reduction CastableBOp Int          [Int]                Float
+    -- ^                     input rank   output permutation   scale output
+
+  | KI_EW UOp [Int]                Float
+    -- ^      output permutation   scale output
+
+  | KI_EWB BOp [Int] [Int] [Int] Float Float
+    -- ^ This is also an einstein formulation, except there must be no aggs
+    --    ijk,jk->ijk, for instance
+    --    KI_EWB Sub [0,1,2] [1,2] [0,1,2]
+
+  | KI_Dropout Int                 Float
+    -- ^       input/output rank   dropout propability
+
+
+instance Show Kernel where
+  show k = show_ k
+    where
+    showModes xs = "[" ++ sepBy "," show xs ++ "]"
+    show_ (KI_Contraction lhs rhs out _) =
+      "Contraction " ++ showModes lhs ++ showModes rhs ++ "->" ++ showModes out
+    show_ (KI_Reduction c n out _) =
+      "Reduction " ++ show c ++ " " ++ showModes (idxInterval n) ++ "->" ++ showModes  out
+    show_ (KI_EW o out _) =
+      "Ew " ++ show o ++ " " ++ showModes (idxInterval (length out)) ++ "->" ++ showModes  out
+    show_ (KI_EWB o lhs rhs out _ _) =
+      "Ewb " ++ show o ++ " " ++ showModes lhs ++ showModes rhs ++ "->" ++ showModes out
+    show_ (KI_Dropout n _) =
+      "Dropout " ++ show n
 
 data Param = Pi Int | Pf Float | Pb Bool
 
@@ -79,6 +107,11 @@ data CastableBOp =
     CastableAdd
   | CastableMax
   | CastableMin
+
+instance Show CastableBOp where
+  show CastableAdd = "+"
+  show CastableMax = "max"
+  show CastableMin = "min"
 
 instance Paramable CastableBOp where
   paramable CastableAdd = paramable Add
@@ -154,14 +187,13 @@ instance Paramable Kernel where
       nl = Pi (length lhs)
       nr = Pi (length rhs)
       no = Pi (length out)
-  paramable (KI_Reduction op _ outSet alpha) = concat [paramable op, [Pf alpha], map Pi out]
-    where out = IntSet.toAscList outSet
-  paramable (KI_EW uop out alpha) = concat [paramable uop, [Pf alpha], map Pi out]
-  paramable (KI_EWB bop lhs rhs alpha beta) = concat [
-    paramable bop,
-    [Pf alpha, Pf beta],
-    (Pi (length lhs)):(map Pi lhs),
-    (Pi (length rhs)):(map Pi rhs)]
+  paramable (KI_Reduction op _ outModes alpha) = concat [paramable op, [Pf alpha], map Pi outModes]
+  paramable (KI_EW uop outModes alpha) = concat [paramable uop, [Pf alpha], map Pi outModes]
+  paramable (KI_EWB bop lhs rhs out alpha beta) =
+    (paramable bop) ++ [Pf alpha, Pf beta] ++ f lhsOrd ++ f rhsOrd
+    where
+      f xs = (Pi (length xs)):(map Pi xs)
+      [lhsOrd, rhsOrd] = getInputOrderings [lhs, rhs] out
   paramable (KI_Dropout _ f) = [Pf f]
 
 checkContraction [] [] [] = False -- don't do this
@@ -180,5 +212,30 @@ incToAgg :: IntSet -> [a] -> [a]
 incToAgg aggd inc = map fst $ filter isAgg $ zip inc [0..]
   where
   isAgg    (_, idx) = idx `IntSet.member` aggd
+
+-- Basically, given an einsum formulation where
+-- the set of the modes on the lhs and on the rhs are equal,
+-- rename the modes on the output side to be increasing..
+-- So from kij,ij->kij
+--      to ijk,jk->ijk... This function would return
+--                          (ijk,jk).
+getInputOrderings :: [[Rank]] -> [Rank] -> [[Rank]]
+
+getInputOrderings inputs out | checkOrderings inputs out =
+  let table = zip out [0..]
+      f i = case i `lookup` table of
+              Nothing -> error "should not happen"
+              Just ret -> ret
+   in map (map f) inputs
+
+getInputOrderings inputs out = error $
+  "invalid einsum formulation! " ++ show inputs ++ " " ++ show out
+
+checkOrderings :: [[Rank]] -> [Rank] -> Bool
+checkOrderings inputs out =
+  let inputsS = map IntSet.fromList inputs
+      outS = IntSet.fromList out
+      correctOut = IntSet.fromList [0..(length out - 1)]
+   in outS == correctOut && unions inputsS == outS
 
 

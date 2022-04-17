@@ -167,16 +167,16 @@ normModule name features eps = Module name normVars normForward
     --     xmas   = xma / sc
     --     xmasm  = xmas + b_2
     let n = (fromIntegral features :: Float)
-    m  <- reductionAlpha CastableAdd (IntSet.singleton 0) (1/n) x  -- ji
-    xm <- elementwiseBinary Sub [0,1,2] [1,2] x m                  -- fji
+    m  <- reductionAlpha CastableAdd [1,2] (1/n) x  -- ji
+    xm <- elementwiseBinary Sub [0,1,2] [1,2] [0,1,2] x m          -- fji
 
     s2 <- contractionAlpha [0,1,2] [0,1,2] [1,2] (1/(n-1)) xm xm -- ji
     s  <- elementwise Sqrt [0,1] s2                              -- ji
     sc <- elementwise (AddScalar eps) [0,1] s                    -- ji
 
-    xma    <- elementwiseBinary Mul [0,1,2] [0]   xm   a_2       -- fji
-    xmas   <- elementwiseBinary Div [0,1,2] [1,2] xma  sc        -- fji
-    xmasm  <- elementwiseBinary Add [0,1,2] [0]   xmas b_2       -- fji
+    xma    <- elementwiseBinary Mul [0,1,2] [0]   [0,1,2] xm   a_2  -- fji
+    xmas   <- elementwiseBinary Div [0,1,2] [1,2] [0,1,2] xma  sc   -- fji
+    xmasm  <- elementwiseBinary Add [0,1,2] [0]   [0,1,2] xmas b_2  -- fji
 
     return [xmasm]
 
@@ -202,11 +202,11 @@ softmaxModule = Module "softmax" [] softmaxForward
     let allR = [0..(n-1)]
         lstR = [1..(n-1)]
     -- x                                                      ij
-    c   <- reduction CastableMax (IntSet.singleton 0) x    -- j
-    xc  <- elementwiseBinary Sub allR lstR x c             -- ij
+    c   <- reduction CastableMax lstR x                    -- j
+    xc  <- elementwiseBinary Sub allR lstR allR x c        -- ij
     ex  <- elementwise Exp allR xc                         -- ij
-    de  <- reduction CastableAdd  (IntSet.singleton 0) ex  -- j
-    out <- elementwiseBinary Div allR lstR ex de           -- ij
+    de  <- reduction CastableAdd  lstR ex                  -- j
+    out <- elementwiseBinary Div allR lstR allR ex de      -- ij
     return [out]
 
 positionwiseFeedForward :: String -> Int -> Int -> Float -> Module ()

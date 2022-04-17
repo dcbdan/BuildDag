@@ -106,8 +106,8 @@ rowMajorLinearModule name nI nJ nK = Module name linearVars linearForward
     Tensor "b" [nK]     (InitRandom (-1.0) 1.0) ()]
   linearForward [Tensor _ _ _ w, Tensor _ _ _ b] [x] = do
     xw <- matmul x w
-    --ik,k->ik ----------  i k   k
-    xwb <- elementwiseBinary Add [0,1] [1] xw b
+    --ik,k->ik ----------         i k   k   i k
+    xwb <- elementwiseBinary Add [0,1] [1] [0,1] xw b
     return [xwb]
 
 generalLinearModule :: String -> [Int] -> [(Dim, Int)] -> [Int] -> Module ()
@@ -125,7 +125,7 @@ generalLinearModule name inModes paramInfo outModes = Module name linearVars lin
     Tensor "b" bDims (InitRandom (-1.0) 1.0) ()]
   linearForward [Tensor _ _ _ w, Tensor _ _ _ b] [x] = do
     xw  <- contraction inModes wModes outModes x w
-    xwb <- elementwiseBinary Add outModes bModes xw b
+    xwb <- elementwiseBinary Add outModes bModes outModes xw b
     return [xwb]
 
 -- Each of the modules has one input and one output.
