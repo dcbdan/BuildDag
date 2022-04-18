@@ -78,23 +78,23 @@ elementwiseAlpha op outModes alpha inn =
             then error "rankIn is incrrect size in EW"
             else _join joinKernel [inn]
 
-elementwiseBinary a b c d g h = elementwiseBinaryAlpha a b c d 1.0 1.0 g h
+elementwiseBinary a b c d g h = elementwiseBinaryAlpha a b c d 1.0 g h
 
 -- This op does not do an input reblocking or a post aggregation.
 elementwiseBinaryAlpha ::
   BOp ->
   [Int] -> [Int] -> [Int] ->
-  Float -> Float ->
+  Float ->
   Id -> Id ->
   BuildDagM Id
-elementwiseBinaryAlpha op lhsModes rhsModes outModes alpha beta lhs rhs =
-  let kernel = KI_EWB op lhsModes rhsModes outModes alpha beta
+elementwiseBinaryAlpha op lhsModes rhsModes outModes alpha lhs rhs =
+  let kernel = KI_EWB op lhsModes rhsModes outModes alpha
    in _join kernel [lhs, rhs]
 
 dropout :: Float -> Id -> BuildDagM Id
 dropout f inn = do
   n <- getOutputRank inn
-  _join (KI_Dropout n f) [inn]
+  elementwise (Dropout f) (idxInterval n) inn
 
 _same_dim_binary :: BOp -> Id -> Id -> BuildDagM Id
 _same_dim_binary op lhs rhs = do

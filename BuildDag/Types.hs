@@ -41,11 +41,10 @@ instance Paramable NodeInfo where
     f (Join kernel) = (Pi (whichKI kernel)):(paramable kernel)
     f (Reblock)     = [Pi 1]
     f (Agg op)      = (Pi 7):(paramable op)
-    whichKI (KI_Contraction  _ _ _ _    ) = 2
-    whichKI (KI_Reduction    _ _ _ _    ) = 3
-    whichKI (KI_EW           _ _ _      ) = 4
-    whichKI (KI_EWB          _ _ _ _ _ _) = 5
-    whichKI (KI_Dropout      _ _        ) = 6
+    whichKI (KI_Contraction  _ _ _ _  ) = 2
+    whichKI (KI_Reduction    _ _ _ _  ) = 3
+    whichKI (KI_EW           _ _ _    ) = 4
+    whichKI (KI_EWB          _ _ _ _ _) = 5
 
 data Node = Node {
   _id      :: Id,
@@ -73,14 +72,10 @@ data Kernel =
   | KI_EW UOp [Int]                Float
     -- ^      output permutation   scale output
 
-  | KI_EWB BOp [Int] [Int] [Int] Float Float
+  | KI_EWB BOp [Int] [Int] [Int] Float
     -- ^ This is also an einstein formulation, except there must be no aggs
     --    ijk,jk->ijk, for instance
     --    KI_EWB Sub [0,1,2] [1,2] [0,1,2]
-
-  | KI_Dropout Int                 Float
-    -- ^       input/output rank   dropout propability
-
 
 instance Show Kernel where
   show k = show_ k
@@ -92,10 +87,8 @@ instance Show Kernel where
       "Reduction " ++ show c ++ " " ++ showModes (idxInterval n) ++ "->" ++ showModes  out
     show_ (KI_EW o out _) =
       "Ew " ++ show o ++ " " ++ showModes (idxInterval (length out)) ++ "->" ++ showModes  out
-    show_ (KI_EWB o lhs rhs out _ _) =
+    show_ (KI_EWB o lhs rhs out _) =
       "Ewb " ++ show o ++ " " ++ showModes lhs ++ showModes rhs ++ "->" ++ showModes out
-    show_ (KI_Dropout n _) =
-      "Dropout " ++ show n
 
 data Param = Pi Int | Pf Float | Pb Bool
 
@@ -150,6 +143,7 @@ data UOp =
   | Reluderiv
   | Sqrt
   | AddScalar Float
+  | Dropout Float
 
 instance Paramable UOp where
   paramable Sigmoid       = [Pi 0]
@@ -159,6 +153,7 @@ instance Paramable UOp where
   paramable Reluderiv     = [Pi 4]
   paramable Sqrt          = [Pi 5]
   paramable (AddScalar f) = [Pi 6, Pf f]
+  paramable (Dropout f)   = [Pi 7, Pf f]
 
 instance Show UOp where
   show  Sigmoid      = "sigmoid"
@@ -168,7 +163,7 @@ instance Show UOp where
   show  Reluderiv    = "reluderiv"
   show  Sqrt         = "sqrt"
   show (AddScalar _) = "addScalar"
-
+  show (Dropout _)   = "dropout"
 
 data Init =
     InitConstant Float
@@ -189,12 +184,11 @@ instance Paramable Kernel where
       no = Pi (length out)
   paramable (KI_Reduction op _ outModes alpha) = concat [paramable op, [Pf alpha], map Pi outModes]
   paramable (KI_EW uop outModes alpha) = concat [paramable uop, [Pf alpha], map Pi outModes]
-  paramable (KI_EWB bop lhs rhs out alpha beta) =
-    (paramable bop) ++ [Pf alpha, Pf beta] ++ f lhsOrd ++ f rhsOrd
+  paramable (KI_EWB bop lhs rhs out alpha) =
+    (paramable bop) ++ [Pf alpha] ++ f lhsOrd ++ f rhsOrd
     where
       f xs = (Pi (length xs)):(map Pi xs)
       [lhsOrd, rhsOrd] = getInputOrderings [lhs, rhs] out
-  paramable (KI_Dropout _ f) = [Pf f]
 
 checkContraction [] [] [] = False -- don't do this
 checkContraction lhs rhs out =

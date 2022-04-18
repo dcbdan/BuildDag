@@ -26,7 +26,7 @@ getIncOutRank (KI_Contraction lhs rhs out _) =
 getIncOutRank (KI_Reduction _ nInc out _) = (nInc, length out)
 getIncOutRank (KI_EW _ out _) = (n, n)
   where n = length out
-getIncOutRank (KI_EWB _ lhs rhs out _ _) =
+getIncOutRank (KI_EWB _ lhs rhs out _) =
   let nInc = IntSet.size (lhsS `union` rhsS)
       nOut = length out
       lhsS = IntSet.fromList lhs
@@ -34,8 +34,6 @@ getIncOutRank (KI_EWB _ lhs rhs out _ _) =
    in if nInc /= nOut
          then error "Invalid EWB"
          else (nInc, nOut)
-getIncOutRank (KI_Dropout n _) = (n, n)
-
 
 -- Each kernel has an incident rank R and they are labeled
 --   [0,...,R-1].
@@ -61,9 +59,7 @@ getOrderings k@(KI_Reduction _ n outModes _) =
 getOrderings (KI_EW _ outModes _) = getInputOrderings [idxInterval n] outModes
   where n = length outModes
 
-getOrderings (KI_EWB _ lhs rhs out _ _) = getInputOrderings [lhs, rhs] out
-
-getOrderings (KI_Dropout n _) = [idxInterval n]
+getOrderings (KI_EWB _ lhs rhs out _) = getInputOrderings [lhs, rhs] out
 
 -- Get the orderings of the inputs and use that to deduce
 -- the incident dimensions. If any of the deductions do not
