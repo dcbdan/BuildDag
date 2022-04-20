@@ -37,14 +37,14 @@ data NodeInfo =
 instance Paramable NodeInfo where
   paramable = f
     where
-    f (Input init)  = (Pi 0):(paramable init)
+    f (Input init)  = (paramable init)
     f (Join kernel) = (Pi (whichKI kernel)):(paramable kernel)
-    f (Reblock)     = [Pi 1]
-    f (Agg op)      = (Pi 7):(paramable op)
-    whichKI (KI_Contraction  _ _ _ _  ) = 2
-    whichKI (KI_Reduction    _ _ _ _  ) = 3
-    whichKI (KI_EW           _ _ _    ) = 4
-    whichKI (KI_EWB          _ _ _ _ _) = 5
+    f (Reblock)     = []
+    f (Agg op)      = (paramable op)
+    whichKI (KI_Contraction  _ _ _ _  ) = 0
+    whichKI (KI_Reduction    _ _ _ _  ) = 1
+    whichKI (KI_EW           _ _ _    ) = 2
+    whichKI (KI_EWB          _ _ _ _ _) = 3
 
 data Node = Node {
   _id      :: Id,
@@ -182,7 +182,7 @@ instance Paramable Kernel where
       nl = Pi (length lhs)
       nr = Pi (length rhs)
       no = Pi (length out)
-  paramable (KI_Reduction op _ outModes alpha) = concat [paramable op, [Pf alpha], map Pi outModes]
+  paramable (KI_Reduction op n outModes alpha) = concat [paramable op, [Pf alpha], [Pi n], map Pi outModes]
   paramable (KI_EW uop outModes alpha) = concat [paramable uop, [Pf alpha], map Pi outModes]
   paramable (KI_EWB bop lhs rhs out alpha) =
     (paramable bop) ++ [Pf alpha] ++ f lhsOrd ++ f rhsOrd
