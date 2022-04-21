@@ -80,7 +80,7 @@ elementwiseAlpha op outModes alpha inn =
 
 elementwiseBinary a b c d g h = elementwiseBinaryAlpha a b c d 1.0 g h
 
--- This op does not do an input reblocking or a post aggregation.
+-- There is no aggregation.
 elementwiseBinaryAlpha ::
   BOp ->
   [Int] -> [Int] -> [Int] ->
@@ -89,7 +89,9 @@ elementwiseBinaryAlpha ::
   BuildDagM Id
 elementwiseBinaryAlpha op lhsModes rhsModes outModes alpha lhs rhs =
   let kernel = KI_EWB op lhsModes rhsModes outModes alpha
-   in _join kernel [lhs, rhs]
+   in do lhsReblock <- _reblock lhs
+         rhsReblock <- _reblock rhs
+         _join kernel [lhsReblock, rhsReblock]
 
 dropout :: Float -> Id -> BuildDagM Id
 dropout f inn = do
