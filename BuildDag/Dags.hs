@@ -5,6 +5,7 @@ module BuildDag.Dags(
 import BuildDag.Dags.ChainMatMul
 import BuildDag.Dags.AmazonCat13K
 import qualified BuildDag.Dags.Bert as Bert
+import qualified BuildDag.Dags.Ff as Ff
 
 --------------------------------------------------------------------
 
@@ -24,7 +25,9 @@ dagUsage = [
     "bert batchSize",
     "bert batchSize numLayers nQuery nHead nSequence",
     "bert batchSize numLayers nQuery nHead nSequence dropout",
-    "matmul nI nJ nK                   [for ij,jk->ik]"
+    "matmul nI nJ nK                   [for ij,jk->ik]",
+    "7matmul n",
+    "ff nB nInn nOut nHidden"
   ]
 
 parseDagArgs :: String -> [String] -> Maybe Dag
@@ -66,6 +69,26 @@ parseDagArgs "matmul" s | length s == 3 = do
   let dagM = chainMatMul $ CMNode (CMLeaf "X") (CMLeaf "Y")
       sizes = Map.fromList [("X", [i,j]), ("Y", [j,k])]
   return $ getDag sizes dagM
+
+parseDagArgs "7matmul" [nStr] = do
+  n <- readDimension nStr
+  let name n = "X" ++ show n
+      f n1 n2 = CMNode (CMLeaf (name n1)) (CMLeaf (name n2))
+      l1 = f 1 2
+      l2 = f 3 4
+      l3 = f 5 6
+      l4 = f 7 8
+      m1 = CMNode l1 l2
+      m2 = CMNode l3 l4
+      dagM = chainMatMul $ CMNode m1 m2
+      sizes = Map.fromList $ zip (map name [1..8]) (replicate 8 [n,n])
+  return $ getDag sizes dagM
+
+parseDagArgs "ff" s | length s == 4 = do
+  ds <- mapM readDimension s
+  let [nB,nInn,nOut,nHidden] = ds
+  return $ (uncurry getDag) (Ff.ff nB nInn nOut nHidden)
+
 parseDagArgs _ _ = Nothing
 
 getDag :: Map String Dims -> (BuildDagM a) -> Dag
