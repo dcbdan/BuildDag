@@ -20,16 +20,19 @@ inputs n p h l = Map.fromList [
   ("W1", [h,p]),
   ("W2", [l,h]) ]
 
+learningRate :: Float
+learningRate = 0.01
+
 build :: BuildDagM ()
 build = do
   -- w: weight
   -- g: grad
   -- t: tmp
   -- s: tmp
-  x  <- initRandom "X"  (-1.0) 1.0 -- pn
-  y  <- initRandom "Y"  (-1.0) 1.0 -- ln
-  w1 <- initRandom "W1" (-1.0) 1.0 -- hp
-  w2 <- initRandom "W2" (-1.0) 1.0 -- lh
+  x  <- initFile "X" 1 -- pn
+  y  <- initFile "Y" 2 -- ln
+  w1 <- initRandom "W1" (-0.1) 0.1 -- hp
+  w2 <- initRandom "W2" (-0.1) 0.1 -- lh
 
   s1 <- matmul w1 x               -- hn
   a1 <- elementwise Relu [0,1] s1 -- hn
@@ -38,14 +41,18 @@ build = do
   a2 <- elementwise Sigmoid [0,1] s2 -- ln
 
   ga2 <- subtract a2 y -- ln
-  gw2 <- matmul_T ga2 a1 -- lh
+  gw2 <- matmul_TAlpha learningRate ga2 a1 -- lh
 
   tga1 <- matmulT_ w2 ga2                -- hn
   tra1 <- elementwise Reluderiv [0,1] a1 -- hn
   ga1  <- hadamard tga1 tra1             -- hn
 
-  gw1 <- matmul_T ga1 x -- hp
+  gw1 <- matmul_TAlpha learningRate ga1 x -- hp
+
+  w1_ <- subtract w1 gw1
+  w2_ <- subtract w2 gw2
 
   return ()
 
-
+matmul_TAlpha alpha = contractionAlpha [0,1] [2,1] [0,2] alpha
+matmulT_Alpha alpha = contractionAlpha [1,0] [1,2] [0,2] alpha

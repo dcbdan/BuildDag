@@ -5,7 +5,7 @@ module BuildDag.Build (
   elementwise, elementwiseAlpha,
   elementwiseBinary, elementwiseBinaryAlpha,
   dropout, add, subtract, hadamard,
-  initInput, initRandom, initConstant,
+  initInput, initRandom, initConstant, initFile,
   ----------------
   liftGraph, getObject, getOutputDims
 ) where
@@ -121,6 +121,9 @@ initRandom name a b = _input name (InitRandom (min a b) (max a b))
 
 initConstant :: String -> Float -> BuildDagM Id
 initConstant name val = _input name (InitConstant val)
+
+initFile :: String -> Int -> BuildDagM Id
+initFile name whichFile = _input name (InitFile whichFile)
 
 --------------------------------------------------------------------------------
 
