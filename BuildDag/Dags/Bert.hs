@@ -16,8 +16,6 @@ import BuildDag.Misc ( (.>) )
 
 import qualified BuildDag.Graph as Graph
 
-import Debug.Trace
-
 -- This is a copy of
 --   https://github.com/codertimo/BERT-pytorch
 
@@ -62,7 +60,7 @@ bertPerturb nBatch params =
       rename s = s ++ "__perturbed"
       mapKey f = Map.toList .> map fix .> Map.fromList
         where fix (k,v) = (f k, v)
-      sizings = traceShowId $
+      sizings =
         Map.insert "X" [nEmbed, nSequence, nBatch] $
           (tensorsMapping mod)
           `Map.union`
