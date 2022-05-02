@@ -1,11 +1,13 @@
 module BuildDag.Module(
   Module(..), Name,
-  initialize, buildForward,
+  initialize, perturb, buildForward,
   forward11, forward_1, forward1_, forward__,
-  variablesMapping, modelSize,
+  variablesMapping, tensorsMapping, modelSize,
   rowMajorLinearModule, generalLinearModule,
   straightForward
 ) where
+
+import Prelude hiding ( subtract )
 
 import Control.Monad ( foldM )
 
@@ -34,9 +36,8 @@ data Module a =
       -- ^ given training information, input information that match init and inputs,
       --   but with ids instead of tensors, construct the outputs but with ids
     }
-  | Tensor String Dims Init a
-  -- I'm not distinguishing between constant and trainable tensors, but this could
-  -- be done by adding a separate constructor
+  | Tensor Bool String Dims Init a
+  -- The Bool specifies that the tensor is a variable and not a constant..
 
 type Name = [String]
 
@@ -50,26 +51,49 @@ forward__ mod xs =          forward mod (moduleVars mod) xs
 initialize :: Module () -> BuildDagM (Module Id)
 initialize = f []
   where
-  f nms (Tensor name dims init ()) =
-    Tensor name dims init <$> initInput fullName init
+  f nms (Tensor isVar name dims init ()) =
+    Tensor isVar name dims init <$> initInput fullName init
       where fullName = fullNameOf (name:nms)
   f nms mod = do
     vars <- mapM (f (name mod:nms)) (moduleVars mod)
     return $ mod { moduleVars = vars }
 
+-- For each variable, create an identical tensor and subtract from that
+perturb ::
+  Float -> Float -> (String -> String) ->
+  Module Id -> BuildDagM (Module Id)
+perturb a b rename = recurse []
+  where
+  recurse nms (Tensor True name dims init tInn) = do
+    let fullName = fullNameOf (name:nms)
+    perturbed <- initRandom (rename fullName) a b
+    tOut <- subtract tInn perturbed
+    return $ Tensor True name dims init tOut
+  recurse _ t@(Tensor False _ _ _ _) = return t
+  recurse nms (Module name varsInn forward) = do
+    varsOut <- mapM (recurse (name:nms)) varsInn
+    return $ Module name varsOut forward
+
 -- given a module with labeled ids, map input ids to output ids
 buildForward :: Module Id -> [Id] -> BuildDagM [Id]
 buildForward (Module _ vars forward) = forward vars
-buildForward (Tensor _ _ _ _) = error "tensors cannot be forwarded"
+buildForward (Tensor _ _ _ _ _) = error "tensors cannot be forwarded"
 
 variablesOf :: Module a -> [(Name, Dims, a)]
 variablesOf = f []
   where
-  f nms (Tensor name dims init v) = [(name:nms, dims, v)]
+  f nms (Tensor True name dims init v) = [(name:nms, dims, v)]
+  f nms (Tensor False _ _ _ _) = []
+  f nms (Module name vars _) = concat $ map (f (name:nms)) vars
+
+tensorsOf :: Module a -> [(Name, Dims, a)]
+tensorsOf = f []
+  where
+  f nms (Tensor _ name dims init v) = [(name:nms, dims, v)]
   f nms (Module name vars _) = concat $ map (f (name:nms)) vars
 
 instance Show a => Show (Module a) where
-  show = variablesOf .> toTable .> formatTable 2 .> unlines
+  show = tensorsOf .> toTable .> formatTable 2 .> unlines
     where toTable tvars =
             let largestNameSpace = maximum $ map (fst3 .> length) tvars
                 fst3 (x,_,_) = x
@@ -82,6 +106,10 @@ instance Show a => Show (Module a) where
 
 variablesMapping :: Module a -> Map String Dims
 variablesMapping = variablesOf .> map fix .> Map.fromList
+  where fix (name, dims, _) = (fullNameOf name, dims)
+
+tensorsMapping :: Module a -> Map String Dims
+tensorsMapping = tensorsOf .> map fix .> Map.fromList
   where fix (name, dims, _) = (fullNameOf name, dims)
 
 modelSize :: Module a -> Int
@@ -102,9 +130,9 @@ rowMajorLinearModule :: String -> Dim -> Dim -> Dim -> Module ()
 rowMajorLinearModule name nI nJ nK = Module name linearVars linearForward
   where
   linearVars = [
-    Tensor "W" [nJ, nK] (InitRandom (-1.0) 1.0) (),
-    Tensor "b" [nK]     (InitRandom (-1.0) 1.0) ()]
-  linearForward [Tensor _ _ _ w, Tensor _ _ _ b] [x] = do
+    Tensor True "W" [nJ, nK] (InitRandom (-1.0) 1.0) (),
+    Tensor True "b" [nK]     (InitRandom (-1.0) 1.0) ()]
+  linearForward [Tensor _ _ _ _ w, Tensor _ _ _ _ b] [x] = do
     xw <- matmul x w
     --ik,k->ik ----------         i k   k   i k
     xwb <- elementwiseBinary Add [0,1] [1] [0,1] xw b
@@ -121,9 +149,9 @@ generalLinearModule name inModes paramInfo outModes = Module name linearVars lin
     where isNewMode (dim,mode) =
             (not $ mode `elem` inModes) && (mode `elem` outModes)
   linearVars = [
-    Tensor "W" wDims (InitRandom (-1.0) 1.0) (),
-    Tensor "b" bDims (InitRandom (-1.0) 1.0) ()]
-  linearForward [Tensor _ _ _ w, Tensor _ _ _ b] [x] = do
+    Tensor True "W" wDims (InitRandom (-1.0) 1.0) (),
+    Tensor True "b" bDims (InitRandom (-1.0) 1.0) ()]
+  linearForward [Tensor _ _ _ _ w, Tensor _ _ _ _ b] [x] = do
     xw  <- contraction inModes wModes outModes x w
     xwb <- elementwiseBinary Add outModes bModes outModes xw b
     return [xwb]

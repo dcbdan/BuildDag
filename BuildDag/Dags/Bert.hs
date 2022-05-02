@@ -1,5 +1,5 @@
 module BuildDag.Dags.Bert (
-  Params(..), bert,
+  Params(..), bert, bertPerturb
 ) where
 
 import Data.Map ( Map )
@@ -12,7 +12,11 @@ import BuildDag.Types
 import BuildDag.Module
 import BuildDag.Build
 
+import BuildDag.Misc ( (.>) )
+
 import qualified BuildDag.Graph as Graph
+
+import Debug.Trace
 
 -- This is a copy of
 --   https://github.com/codertimo/BERT-pytorch
@@ -36,14 +40,38 @@ _nEmbed params = (_nHead params) * (_nQuery params)
 -- The input tensor has shape (  Embed    , Sequence, Batch)
 --                             ^^^^^^^^^^^
 --                             Query, Head
+-- nHidden = Embed
 
 bert :: Int -> Params -> (Map String Dims, BuildDagM ())
 bert nBatch params =
   let mod = bertModule params
       sizings = Map.insert "X" [nEmbed, nSequence, nBatch] $
-                  variablesMapping mod
+                  tensorsMapping mod
       builtDag = do
         modBuilt <- initialize mod
+        x <- initRandom "X" (-0.1) (0.1)
+        forward11 modBuilt x
+        return ()
+      nEmbed    = _nEmbed params
+      nSequence = _nSequence params
+   in (sizings, builtDag)
+
+bertPerturb :: Int -> Params -> (Map String Dims, BuildDagM ())
+bertPerturb nBatch params =
+  let mod = bertModule params
+      rename s = s ++ "__perturbed"
+      mapKey f = Map.toList .> map fix .> Map.fromList
+        where fix (k,v) = (f k, v)
+      sizings = traceShowId $
+        Map.insert "X" [nEmbed, nSequence, nBatch] $
+          (tensorsMapping mod)
+          `Map.union`
+          (mapKey rename (variablesMapping mod))
+
+
+      builtDag = do
+        modBuiltNoPerturb <- initialize mod
+        modBuilt          <- perturb (-0.1) (0.1) rename modBuiltNoPerturb
         x <- initRandom "X" (-0.1) (0.1)
         forward11 modBuilt x
         return ()
@@ -148,9 +176,9 @@ normModule name features eps = Module name normVars normForward
   -- xIn, xOut is [features, j, i]
   --              [f,j,i]
   normVars = [
-    Tensor "a_2" [features] (InitConstant 1.0) (),
-    Tensor "b_2" [features] (InitConstant 0.0) ()]
-  normForward [(Tensor _ _ _ a_2), (Tensor _ _ _ b_2)] [x] = do
+    Tensor False "a_2" [features] (InitConstant 1.0) (),
+    Tensor False "b_2" [features] (InitConstant 0.0) ()]
+  normForward [(Tensor _ _ _ _ a_2), (Tensor _ _ _ _ b_2)] [x] = do
     --  In ROW MAJOR pytorch:
     --    # [i,j,k] -> [i,j,1]
     --    mean = x.mean(-1, keepdim=True)

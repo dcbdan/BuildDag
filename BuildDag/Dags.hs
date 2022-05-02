@@ -27,7 +27,8 @@ dagUsage = [
     "bert batchSize numLayers nQuery nHead nSequence dropout",
     "matmul nI nJ nK                   [for ij,jk->ik]",
     "7matmul n",
-    "ff nB nInn nOut nHidden"
+    "ff nB nInn nOut nHidden",
+    "bertPerturb batchSize numLayers nQuery nHead nSequence"
   ]
 
 parseDagArgs :: String -> [String] -> Maybe Dag
@@ -88,6 +89,23 @@ parseDagArgs "ff" s | length s == 4 = do
   ds <- mapM readDimension s
   let [nB,nInn,nOut,nHidden] = ds
   return $ (uncurry getDag) (Ff.ff nB nInn nOut nHidden)
+
+parseDagArgs "bertPerturb" (nBatchStr:nLayerStr:nQueryStr:nHeadStr:nSequenceStr:[]) = do
+  nBatch    <- readDimension nBatchStr
+  nLayer    <- readDimension nLayerStr
+  nQuery    <- readDimension nQueryStr
+  nHead     <- readDimension nHeadStr
+  nSequence <- readDimension nSequenceStr
+
+  let params = Bert.Params {
+          Bert._nLayer    = nLayer,
+          Bert._nQuery    = nQuery,
+          Bert._nHead     = nHead,
+          Bert._nSequence = nSequence,
+          Bert._fDropout  = (-1.0) -- no dropout
+        }
+
+  return $ (uncurry getDag) (Bert.bertPerturb nBatch params)
 
 parseDagArgs _ _ = Nothing
 
