@@ -22,6 +22,7 @@ import qualified Data.Map as Map
 dagUsage :: [String]
 dagUsage = [
     "amazonCat13K batchSize hiddenSize",
+    "amazonCat13K batchSize hiddenSize nIter",
     "bert batchSize",
     "bert batchSize numLayers nQuery nHead nSequence",
     "bert batchSize numLayers nQuery nHead nSequence dropout",
@@ -38,7 +39,16 @@ parseDagArgs "amazonCat13K" (nStr:hStr:[]) = do
       l = 13330
   n <- readDimension nStr
   h <- readDimension hStr
-  return $ (uncurry getDag) (amazonCat13K n h)
+  return $ (uncurry getDag) (amazonCat13K n h 1)
+
+parseDagArgs "amazonCat13K" (nStr:hStr:nIterStr:[]) = do
+  let p = 203882
+      l = 13330
+  n <- readDimension nStr
+  h <- readDimension hStr
+  nIter <- readDimension nIterStr
+  return $ (uncurry getDag) (amazonCat13K n h nIter)
+
 
 -- TODO: what are the default sizes?
 parseDagArgs "bert" sizes@(nBatchStr:[]) =

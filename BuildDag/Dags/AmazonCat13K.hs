@@ -5,11 +5,13 @@ import Prelude hiding ( subtract )
 import Data.Map ( Map )
 import qualified Data.Map as Map
 
+import Control.Monad ( foldM )
+
 import BuildDag.Types
 import BuildDag.Build
 
-amazonCat13K :: Int -> Int -> (Map String Dims, BuildDagM ())
-amazonCat13K n h = (inputs n p h l, build)
+amazonCat13K :: Int -> Int -> Int -> (Map String Dims, BuildDagM ())
+amazonCat13K n h nIter = (inputs n p h l, build nIter)
 
 p = 203882
 l = 13330
@@ -23,17 +25,7 @@ inputs n p h l = Map.fromList [
 learningRate :: Float
 learningRate = 0.01
 
-build :: BuildDagM ()
-build = do
-  -- w: weight
-  -- g: grad
-  -- t: tmp
-  -- s: tmp
-  x  <- initFile "X" 1 -- pn
-  y  <- initFile "Y" 2 -- ln
-  w1 <- initRandom "W1" (-0.1) 0.1 -- hp
-  w2 <- initRandom "W2" (-0.1) 0.1 -- lh
-
+iter x y (w1, w2) = do
   s1 <- matmul w1 x               -- hn
   a1 <- elementwise Relu [0,1] s1 -- hn
 
@@ -51,6 +43,22 @@ build = do
 
   w1_ <- subtract w1 gw1
   w2_ <- subtract w2 gw2
+
+  return (w1_, w2_)
+
+build :: Int -> BuildDagM ()
+build nIter = do
+  -- w: weight
+  -- g: grad
+  -- t: tmp
+  -- s: tmp
+  x  <- initFile "X" 1 -- pn
+  y  <- initFile "Y" 2 -- ln
+  w1 <- initRandom "W1" (-0.1) 0.1 -- hp
+  w2 <- initRandom "W2" (-0.1) 0.1 -- lh
+
+  let f params whichIter = iter x y params
+  (w1Out, w2Out) <- foldM f (w1,w2) [1..nIter]
 
   return ()
 
