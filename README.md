@@ -29,5 +29,5 @@ The From Dag application
 
 1. Parses the DAG.
 2. Gives each node a relational partition. That is, a matrix is not represented as a single contiguous chunk of memory but as rows and columns of smaller contiguous "block" matrices--all blocks represnting a larget tensor are called relations. From Dag makes decisions as to how big or small the blocks should be.
-3. One a partitioning is assigned, TOS commands are generated
+3. Once a partitioning is assigned, TOS commands are generated
 4. Then the TOS executes the commands.

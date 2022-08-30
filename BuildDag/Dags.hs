@@ -5,6 +5,7 @@ module BuildDag.Dags(
 import BuildDag.Dags.ChainMatMul
 import BuildDag.Dags.AmazonCat13K
 import qualified BuildDag.Dags.Bert as Bert
+import qualified BuildDag.Dags.BHT as BHT
 import qualified BuildDag.Dags.Ff as Ff
 
 --------------------------------------------------------------------
@@ -29,7 +30,8 @@ dagUsage = [
     "matmul nI nJ nK                   [for ij,jk->ik]",
     "7matmul n",
     "ff nB nInn nOut nHidden",
-    "bertPerturb batchSize numLayers nQuery nHead nSequence"
+    "bertPerturb batchSize numLayers nQuery nHead nSequence",
+    "bht batchSize nSequence nHidden nHead nHH"
   ]
 
 parseDagArgs :: String -> [String] -> Maybe Dag
@@ -116,6 +118,23 @@ parseDagArgs "bertPerturb" (nBatchStr:nLayerStr:nQueryStr:nHeadStr:nSequenceStr:
         }
 
   return $ (uncurry getDag) (Bert.bertPerturb nBatch params)
+
+parseDagArgs "bht" (nBatchStr:nSeqStr:nHiddenStr:nHeadStr:nHHStr:[]) = do
+  nBatch  <- readDimension nBatchStr
+  nSeq    <- readDimension nSeqStr
+  nHidden <- readDimension nHiddenStr
+  nHead   <- readDimension nHeadStr
+  nHH     <- readDimension nHHStr
+
+  let params = BHT.Params {
+          BHT._nB  = nBatch,
+          BHT._nS  = nSeq,
+          BHT._nH  = nHidden,
+          BHT._nN  = nHead,
+          BHT._nHH = nHH
+        }
+
+  return $ (uncurry getDag) (BHT.bht params)
 
 parseDagArgs _ _ = Nothing
 
