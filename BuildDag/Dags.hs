@@ -7,6 +7,7 @@ import BuildDag.Dags.AmazonCat13K
 import qualified BuildDag.Dags.Bert as Bert
 import qualified BuildDag.Dags.BHT as BHT
 import qualified BuildDag.Dags.Ff as Ff
+import qualified BuildDag.Dags.Exp as Exp
 
 --------------------------------------------------------------------
 
@@ -31,7 +32,8 @@ dagUsage = [
     "7matmul n",
     "ff nB nInn nOut nHidden",
     "bertPerturb batchSize numLayers nQuery nHead nSequence",
-    "bht batchSize nSequence nHidden nHead nHH"
+    "bht batchSize nSequence nHidden nHead nHH",
+    "exp which"
   ]
 
 parseDagArgs :: String -> [String] -> Maybe Dag
@@ -136,6 +138,12 @@ parseDagArgs "bht" (nBatchStr:nSeqStr:nHiddenStr:nHeadStr:nHHStr:[]) = do
 
   return $ (uncurry getDag) (BHT.bht params)
 
+parseDagArgs "exp" (which:[]) = do
+  w <- readInt which
+  case w of
+    1 -> return $ (uncurry getDag) (Exp.exp01)
+    _ -> Nothing
+
 parseDagArgs _ _ = Nothing
 
 getDag :: Map String Dims -> (BuildDagM a) -> Dag
@@ -143,6 +151,8 @@ getDag lookupTable doThis = fst $ RWS.execRWS doThis lookupTable Graph.empty
 
 readDimension :: String -> Maybe Dim
 readDimension = readMaybe
+
+readInt = readDimension
 
 readFloat :: String -> Maybe Float
 readFloat = readMaybe

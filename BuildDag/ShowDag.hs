@@ -27,6 +27,7 @@ instance Show Node where
               showC (id,ranks) = sepBy "," show (id:ranks)
       f ni@(Reblock) [inn] = "R" ++ showParams (paramable ni) ++ show inn
       f ni@(Agg op) [inn] = "A" ++ showParams (paramable ni) ++ show inn
+      f ni@(MergeSplit ms) [inn] = "M" ++ showParams (paramable ni) ++ show inn
       f _ _ = error "Incorrect number of inputs given to show for Node"
 
       showParams params = "[" ++ sepBy "" showParam params ++ "]"

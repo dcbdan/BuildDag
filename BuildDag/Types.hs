@@ -33,14 +33,19 @@ data NodeInfo =
   | Join Kernel
   | Reblock
   | Agg CastableBOp
+  | MergeSplit (Maybe Dim)
+    -- ^ if this is merge: MergeSplit Nothing  where merge is ij -> k
+    --   if this is split: MergeSplit (Just i) where split is k -> ij
 
 instance Paramable NodeInfo where
   paramable = f
     where
-    f (Input init)  = (paramable init)
-    f (Join kernel) = (Pi (whichKI kernel)):(paramable kernel)
-    f (Reblock)     = []
-    f (Agg op)      = (paramable op)
+    f (Input init)     = (paramable init)
+    f (Join kernel)    = (Pi (whichKI kernel)):(paramable kernel)
+    f (Reblock)        = []
+    f (Agg op)         = (paramable op)
+    f (MergeSplit (Just d)) = [Pi d]
+    f (MergeSplit Nothing)  = [Pi 0]
     whichKI (KI_Contraction  _ _ _ _  ) = 0
     whichKI (KI_Reduction    _ _ _ _  ) = 1
     whichKI (KI_EW           _ _ _    ) = 2

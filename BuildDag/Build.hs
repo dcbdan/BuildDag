@@ -6,6 +6,7 @@ module BuildDag.Build (
   elementwiseBinary, elementwiseBinaryAlpha,
   dropout, add, subtract, hadamard,
   initInput, initRandom, initConstant, initFile,
+  merge, split,
   ----------------
   liftGraph, getObject, getOutputDims
 ) where
@@ -125,6 +126,24 @@ initConstant name val = _input name (InitConstant val)
 initFile :: String -> Int -> BuildDagM Id
 initFile name whichFile = _input name (InitFile whichFile)
 
+-- merge gives: ij->k where |k| = |i| * |j|.
+merge :: Id -> BuildDagM Id
+merge inn = do
+  innDims <- getOutputDims inn
+  let newMergeNode out = Node out [inn] outDims (MergeSplit Nothing)
+      outDims = case innDims of
+                  (i:j:rest) -> (i*j:rest)
+  liftGraph $ Graph.insertObjectWithId newMergeNode
+
+-- split |i| gives: k -> ij where |j| = |k|/|i|.
+split :: Dim -> Id -> BuildDagM Id
+split i inn = do
+  innDims <- getOutputDims inn
+  let newSplitNode out = Node out [inn] outDims (MergeSplit (Just i))
+      outDims = case innDims of
+                  (k:rest) | k `mod` i == 0 -> (i:(k `div` i):rest)
+  liftGraph $ Graph.insertObjectWithId newSplitNode
+
 --------------------------------------------------------------------------------
 
 _input :: String -> Init -> BuildDagM Id
@@ -177,6 +196,7 @@ getAggRanks id = do
     Join k  -> K.getAggRanks k
     Reblock -> IntSet.empty
     Agg _   -> IntSet.empty
+    MergeSplit _ -> IntSet.empty
 
 getOutputRank :: Id -> BuildDagM Rank
 getOutputRank id = do
