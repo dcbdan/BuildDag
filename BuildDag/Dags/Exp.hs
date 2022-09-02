@@ -21,13 +21,24 @@ inputs01 = Map.fromList [
 
 build01 :: BuildDagM ()
 build01 = do
+  -- Note: (1) It is illegal in from dag to (a) have multiple reblocks in a row,
+  --           and to (b) end with a reblock.
+  --       (2) Mergesplits are sneaky reblocks
+  --       =>  It is illegal in from dag to (a) have multiple mergesplits in a row,
+  --           and to (b) end with a reblock.
+  let uop = AddScalar 0.0
+
   x   <- initRandom "x" (-1.0) (1.0)
   xx  <- merge x
-  xxx <- split 6 xx
+  xz  <- elementwise uop [0] xx
+  xxx <- split 6 xz
+  xxz <- elementwise uop [0,1] xxx
 
   y   <- initRandom "y" (-1.0) (1.0)
   yy  <- split 6 y
-  yyy <- merge yy
+  yz  <- elementwise uop [0,1] yy
+  yyy <- merge yz
+  yyz <- elementwise uop [0] yyy
 
   return ()
 
