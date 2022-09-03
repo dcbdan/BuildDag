@@ -5,7 +5,7 @@ module BuildDag.Misc(
   , mapTuple, mapFst, mapSnd, flipTup, fst3, snd3, trd3
   , eMapToLeftList, eMapToRightList, mapIntersectSet, setToMap
   , listUpdate, insertSortedList, findMin, findArgMin, findBestN, idxInterval
-  , formatTable, printTable
+  , formatTable, printTable, split
 )where
 
 import Data.Maybe
@@ -188,4 +188,19 @@ printTable sepSize = formatTable sepSize .> mapM_ putStrLn
 filterWhich :: (Int -> Bool) -> [a] -> [a]
 filterWhich f xs = zip [0..] xs |> filter (fst .> f) |> map snd
 
-
+split :: Eq a => a -> [a] -> [[a]]
+split sep = recurse
+  where
+  recurse [] = [[]]
+  recurse (x:xs) | x == sep = []:(recurse xs)
+  recurse (x:xs) =
+    case recurse xs of
+      (y:ys) -> (x:y):ys
+  --
+  -- main :: IO ()
+  -- main = do
+  --   print $ split ',' "1,2,34,4,5,6" -- [1,2,34,4,5,6]
+  --   print $ split ',' "asdasdasdasd" -- [asd...]
+  --   print $ split ',' ""             -- [""]
+  --   print $ split ',' ",,"           -- ["","",""]
+  --   print $ split ',' "asd,,dsa"     -- ["asd", "", "dsa"]

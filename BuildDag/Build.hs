@@ -6,7 +6,7 @@ module BuildDag.Build (
   elementwiseBinary, elementwiseBinaryAlpha,
   dropout, add, subtract, hadamard, scale,
   initInput, initRandom, initConstant, initFile,
-  merge, split, transpose, permute,
+  merge, split, transpose, permute, einsum, einsumAlpha,
   ----------------
   liftGraph, getObject, getOutputDims
 ) where
@@ -16,10 +16,12 @@ import Prelude hiding ( subtract )
 import Data.IntSet ( IntSet )
 import qualified Data.IntSet as IntSet
 
+import Data.Map ( Map )
 import qualified Data.Map as Map
 
 import qualified Control.Monad.RWS.Lazy as RWS
 import Control.Monad.Reader ( ask )
+import Control.Monad.State ( State, evalState, get, put )
 
 import BuildDag.Graph ( Graph, GraphM )
 import qualified BuildDag.Graph as Graph
@@ -29,6 +31,7 @@ import BuildDag.Types
 import qualified BuildDag.Kernel as K
 
 import BuildDag.Misc ( idxInterval )
+import qualified BuildDag.Misc as Misc ( split )
 
 matmul :: Id -> Id -> BuildDagM Id
 
@@ -167,6 +170,37 @@ permute outModes inn = do
   if length outModes /= rankInn || outModes == [0..(rankInn-1)]
      then error "invalid permute"
      else elementwise NoOp outModes inn
+
+einsum :: String -> Id -> Id -> BuildDagM Id
+einsum einsumStr = einsumAlpha einsumStr 1.0
+
+einsumAlpha :: String -> Float -> Id -> Id -> BuildDagM Id
+einsumAlpha einsumStr f = contractionAlpha lhs rhs out f
+  where (lhs, rhs, out) = fromEinsumString einsumStr
+
+-- Einsum string, loosefly of the form
+--   "batch,feature|feature,hidden|batch,hidden"
+fromEinsumString :: String -> ([Int], [Int], [Int])
+fromEinsumString str = evalState build Map.empty
+  where
+  [sLhs,sRhs,sOut] = map (Misc.split ',') (Misc.split '|' str)
+  build = do
+    iLhs <- mapM toInt sLhs
+    iRhs <- mapM toInt sRhs
+    iOut <- mapM toInt sOut
+    return (iLhs, iRhs, iOut)
+  toInt :: String -> State (Map String Int) Int
+  toInt s = do
+    tableInn <- get
+    case s `Map.lookup` tableInn of
+      (Just i) -> return i
+      Nothing -> do
+        let i        = Map.size tableInn
+            tableOut = Map.insert s i tableInn
+        put tableOut
+        return i
+
+
 
 --------------------------------------------------------------------------------
 
