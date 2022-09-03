@@ -122,6 +122,9 @@ compute [] yhat = do
   lift $ f yhat
 
 compute (thisLayer:layers) x = do
+  params <- bht_params <$> get
+  let Params nB nS nH nN nHH = params
+
   wq <- getParam thisLayer "wq"
   wv <- getParam thisLayer "wv"
   wk <- getParam thisLayer "wk"
@@ -130,12 +133,39 @@ compute (thisLayer:layers) x = do
   w2 <- getParam thisLayer "w2"
 
   -- FORWARD COMPUTATION
-  x_mlp2_p <- undefined
+  xq   <- lift $ fBmm323 1.0 x wq   -- [h1,s,b],[h2,h1]->[h2,s,b]
+  xqp  <- lift $ split nHH xq       -- [h2,s,b] -> [nHH, nN, nS, nB]
+  xqpp <- lift $ transpose 1 2 xqp  -- [nHH, nN, nS, nB] -> [nHH, nS, nN, nB]
 
-  -- RECURSE
+  xk    <- lift $ fBmm323 1.0 x wk       -- [nH,nS,nB]
+  xkp   <- lift $ split nHH xk           -- [nHH,nN,nS,nB]
+  xkppp <- lift $ permute [2,0,1,3] xkp  -- [nS,nHH,nN,nB]
+
+  xv    <- lift $ fBmm323 1.0 x wv   -- [nH,nS,nB]
+  xvp   <- lift $ split nHH xv       -- [nHH,nN,nS,nB]
+  xvpp  <- lift $ transpose 1 2 xvp  -- [nHH,nS,nN,nB]
+
+  x_score_p <- lift $ fBmm444 (1.0 / (sqrt (fromIntegral nHH))) xqpp xkppp -- [nB,nN,nS1,nS2]
+  x_softmax <- lift $ softmax x_score_p                                    -- [nB,nN,nS1,nS2]
+
+  x_att    <- lift $ fBmm444 1.0 x_softmax xvpp -- [nHH,nS,nN,nB]
+  x_att_p  <- lift $ transpose 1 2 x_att        -- [nHH,nN,nS,nB]
+  x_att_pp <- lift $ merge x_att_p              -- [nH,nS,nB]
+
+  x_out   <- lift $ fBmm323 1.0 x_att_pp wo -- [nH,nS,nB]
+  x_out_p <- lift $ add x_out x             -- [nH,nS,nB]
+
+  x_mlp1   <- lift$ fBmm323 1.0 x_out_p w1          -- [4*nH,nS,nB]
+  x_mlp1_p <- lift$ elementwise Relu [0,1,2] x_mlp1 -- [4*nH,nS,nB]
+
+  x_mlp2   <- lift $ fBmm323 1.0 x_mlp1_p w2      -- [nH,nS,nB]
+  x_mlp2_p <- lift $ add x_mlp2 x_out_p           -- [nH,nS,nB]
+
+  -- RECURSE TO DO THE REST OF THE LAYERS
   g_x_mlp2_p <- compute layers x_mlp2_p
 
   -- BACKWARD COMPUTATION
+
   g_wq <- undefined
   g_wv <- undefined
   g_wk <- undefined
@@ -154,48 +184,6 @@ compute (thisLayer:layers) x = do
 
   -- RETURN UPDATED VALUE
   return g_x
-
---build :: Params -> BuildDagM ()
---build (Params nB nS nH nN nHH) = do
---  x  <- initRandom "x"  (-1.0) 1.0
---  wq <- initRandom "wq" (-1.0) 1.0
---  wv <- initRandom "wv" (-1.0) 1.0
---  wk <- initRandom "wk" (-1.0) 1.0
---  wo <- initRandom "wo" (-1.0) 1.0
---  w1 <- initRandom "w1" (-1.0) 1.0
---  w2 <- initRandom "w2" (-1.0) 1.0
---
---  xq   <- fBmm323 1.0 x wq   -- [h1,s,b],[h2,h1]->[h2,s,b]
---  xqp  <- split nHH xq       -- [h2,s,b] -> [nHH, nN, nS, nB]
---  xqpp <- transpose 1 2 xqp  -- [nHH, nN, nS, nB] -> [nHH, nS, nN, nB]
---
---  xk    <- fBmm323 1.0 x wk       -- [nH,nS,nB]
---  xkp   <- split nHH xk           -- [nHH,nN,nS,nB]
---  xkppp <- permute [2,0,1,3] xkp  -- [nS,nHH,nN,nB]
---
---  xv    <- fBmm323 1.0 x wv   -- [nH,nS,nB]
---  xvp   <- split nHH xv       -- [nHH,nN,nS,nB]
---  xvpp  <- transpose 1 2 xvp  -- [nHH,nS,nN,nB]
---
---  x_score_p <- fBmm444 (1.0 / (sqrt (fromIntegral nHH))) xqpp xkppp -- [nB,nN,nS1,nS2]
---  x_softmax <- softmax x_score_p                                    -- [nB,nN,nS1,nS2]
---
---  x_att    <- fBmm444 1.0 x_softmax xvpp -- [nHH,nS,nN,nB]
---  x_att_p  <- transpose 1 2 x_att        -- [nHH,nN,nS,nB]
---  x_att_pp <- merge x_att_p              -- [nH,nS,nB]
---
---  x_out   <- fBmm323 1.0 x_att_pp wo -- [nH,nS,nB]
---  x_out_p <- add x_out x             -- [nH,nS,nB]
---
---  x_mlp1   <- fBmm323 1.0 x_out_p w1          -- [4*nH,nS,nB]
---  x_mlp1_p <- elementwise Relu [0,1,2] x_mlp1 -- [4*nH,nS,nB]
---
---  x_mlp2   <- fBmm323 1.0 x_mlp1_p w2      -- [nH,nS,nB]
---  x_mlp2_p <- add x_mlp2 x_out_p           -- [nH,nS,nB]
---
---  g_x_mlp2_p <- undefined -- Least square error or something...
---
---  return ()
 
 -------------------------------------------------------------------------------
 
