@@ -82,15 +82,6 @@ bht numLayers params@(Params nB nS nH nN nHH) =
 
    in (inputTable, buildDag)
 
---inputs (Params nB nS nH nN nHH) = Map.fromList [
---  ("x", [nH,nS,nB]),
---  ("wq", [nH,nH]),
---  ("wv", [nH,nH]),
---  ("wk", [nH,nH]),
---  ("wo", [nH,nH]),
---  ("w1", [4*nH, nH]),
---  ("w2", [nH, 4*nH])]
-
 -- If we have prefix / name, then return the id;
 -- otherwise, initRandom and get
 getParam :: String -> String -> BhtM Id
@@ -133,45 +124,70 @@ compute (thisLayer:layers) x = do
   w2 <- getParam thisLayer "w2"
 
   -- FORWARD COMPUTATION
+  ------------------------- Eq ( 3)
   xq   <- lift $ fBmm323 1.0 x wq   -- [h1,s,b],[h2,h1]->[h2,s,b]
   xqp  <- lift $ split nHH xq       -- [h2,s,b] -> [nHH, nN, nS, nB]
   xqpp <- lift $ transpose 1 2 xqp  -- [nHH, nN, nS, nB] -> [nHH, nS, nN, nB]
 
+  ------------------------- Eq ( 5)
   xk    <- lift $ fBmm323 1.0 x wk       -- [nH,nS,nB]
   xkp   <- lift $ split nHH xk           -- [nHH,nN,nS,nB]
   xkppp <- lift $ permute [2,0,1,3] xkp  -- [nS,nHH,nN,nB]
 
+  ------------------------- Eq ( 7)
   xv    <- lift $ fBmm323 1.0 x wv   -- [nH,nS,nB]
   xvp   <- lift $ split nHH xv       -- [nHH,nN,nS,nB]
   xvpp  <- lift $ transpose 1 2 xvp  -- [nHH,nS,nN,nB]
 
+  ------------------------- Eq ( 9)
   x_score_p <- lift $ fBmm444 (1.0 / (sqrt (fromIntegral nHH))) xqpp xkppp -- [nB,nN,nS1,nS2]
   x_softmax <- lift $ softmax x_score_p                                    -- [nB,nN,nS1,nS2]
 
+  ------------------------- Eq (11)
   x_att    <- lift $ fBmm444 1.0 x_softmax xvpp -- [nHH,nS,nN,nB]
   x_att_p  <- lift $ transpose 1 2 x_att        -- [nHH,nN,nS,nB]
   x_att_pp <- lift $ merge x_att_p              -- [nH,nS,nB]
 
+  ------------------------- Eq (13)
   x_out   <- lift $ fBmm323 1.0 x_att_pp wo -- [nH,nS,nB]
   x_out_p <- lift $ add x_out x             -- [nH,nS,nB]
 
+  ------------------------- Eq (15)
   x_mlp1   <- lift$ fBmm323 1.0 x_out_p w1          -- [4*nH,nS,nB]
   x_mlp1_p <- lift$ elementwise Relu [0,1,2] x_mlp1 -- [4*nH,nS,nB]
 
+  ------------------------- Eq (17)
   x_mlp2   <- lift $ fBmm323 1.0 x_mlp1_p w2      -- [nH,nS,nB]
   x_mlp2_p <- lift $ add x_mlp2 x_out_p           -- [nH,nS,nB]
 
   -- RECURSE TO DO THE REST OF THE LAYERS
-  g_x_mlp2_p <- compute layers x_mlp2_p
+  g_x_mlp2_p <- compute layers x_mlp2_p           -- [nH,nS,nB]
 
   -- BACKWARD COMPUTATION
+  ------------------------- Eq (18)
+  let g_x_mlp2    = g_x_mlp2_p -- [nH,nS,nB]
+  let g_x_out_p2  = g_x_mlp2_p -- [nH,nS,nB]
+  g_x_mlp1_p <- lift $ fBmm323_ST 1.0 g_x_mlp2 w2       -- [4*nH, nS, nB]
+  g_w2       <- lift $ contract_g_w2 x_mlp1_p g_x_mlp2  -- [nH, 4*nH]
+
+  ------------------------- Eq (16)
+  g_x_mlp1   <- lift $ elementwise Reluderiv [0,1,2] g_x_mlp1_p -- [4*nH, nS, nB]
+  g_x_out_p1 <- lift $ contract_g_x_out_p1 g_x_mlp1 w1          -- [nH,nS,nB]
+  g_x_out_p  <- lift $ add g_x_out_p1 g_x_out_p2                -- [nH,nS,nB]
+  g_w1       <- lift $ contract_g_w1 x_out_p g_x_mlp1           -- [4*nH,nH]
+
+  ------------------------- Eq (14)
+  ------------------------- Eq (12)
+  ------------------------- Eq (10)
+  ------------------------- Eq ( 8)
+  ------------------------- Eq ( 6)
+  ------------------------- Eq ( 4)
+  ------------------------- Eq ( 2)
 
   g_wq <- undefined
   g_wv <- undefined
   g_wk <- undefined
   g_wo <- undefined
-  g_w1 <- undefined
-  g_w2 <- undefined
   g_x  <- undefined
 
   -- DO THE GRADIENT STEP
@@ -189,8 +205,15 @@ compute (thisLayer:layers) x = do
 
 fBmm323 alpha = contractionAlpha [2,1,0] [3,2] [3,1,0] alpha
 
+-- [nH,nS,nB] [nH, four_nH] -> [four_nH,  nS, nB]
+fBmm323_ST alpha = contractionAlpha [nH,nS,nB] [nH, fnH] [fnH, nS, nB] alpha
+  where nH  = 0
+        nS  = 1
+        nB  = 2
+        fnH = 3
+
 -- 1h,h2->12
-fBmm444 alpha innL innR =
+fBmm444 alpha =
   let hh = 0
       s1 = 1
       n  = 2
@@ -199,7 +222,27 @@ fBmm444 alpha innL innR =
       lhs = [hh,s1,n,b]
       rhs = [s2,hh,n,b]
       out = [s2,s1,n,b]
-   in contractionAlpha lhs rhs out alpha innL innR
+   in contractionAlpha lhs rhs out alpha
+
+-- [fnH, nS, nB], [nH, nS, nB]
+contract_g_w2 = contraction [fnH, nS, nB] [nH, nS, nB] [nH, fnH]
+  where nH  = 0
+        nS  = 1
+        nB  = 2
+        fnH = 3
+
+contract_g_x_out_p1 = contraction [fnH, nS, nB] [fnH, nH] [nH, nS, nB]
+  where nH  = 0
+        nS  = 1
+        nB  = 2
+        fnH = 3
+
+-- [nH,nS,nB] [fnH,nS,nB] -> [fnH,nH]
+contract_g_w1 = contraction [nH,nS,nB] [fnH,nS,nB] [fnH,nH]
+  where nH  = 0
+        nS  = 1
+        nB  = 2
+        fnH = 3
 
 -- This is softmaxing the leading dimension, dimension 0.
 --
