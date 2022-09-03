@@ -43,4 +43,20 @@ build01 = do
   return ()
 
 exp02 :: (Map String Dims, BuildDagM ())
-exp02 = undefined
+exp02 = (inputs02, build02)
+
+inputs02 :: Map String Dims
+inputs02 = Map.fromList [
+  ("x", [l, i, j])]
+  where i = 4
+        j = 6
+        k = i*j
+        l = 1024
+
+build02 :: BuildDagM ()
+build02 = do
+  x_lij <- initRandom "x" (-1.0) (1.0)
+  x_jil <- transpose 0 2 x_lij
+  x_kl  <- merge x_jil
+  ret   <- elementwise (AddScalar 123.321) [0,1] x_kl
+  return ()
