@@ -4,9 +4,9 @@ module BuildDag.Build (
   reduction, reductionAlpha,
   elementwise, elementwiseAlpha,
   elementwiseBinary, elementwiseBinaryAlpha,
-  dropout, add, subtract, hadamard,
+  dropout, add, subtract, hadamard, scale,
   initInput, initRandom, initConstant, initFile,
-  merge, split,
+  merge, split, transpose, permute,
   ----------------
   liftGraph, getObject, getOutputDims
 ) where
@@ -114,6 +114,12 @@ add      = _same_dim_binary Add
 hadamard = _same_dim_binary Mul
 subtract = _same_dim_binary Sub
 
+scale :: Float -> Id -> BuildDagM Id
+scale f inn = do
+  r <- getOutputRank inn
+  let ds = [0..(r-1)]
+  elementwise (MulScalar f) ds inn
+
 initInput :: String -> Init -> BuildDagM Id
 initInput = _input
 
@@ -143,6 +149,24 @@ split i inn = do
       outDims = case innDims of
                   (k:rest) | k `mod` i == 0 -> (i:(k `div` i):rest)
   liftGraph $ Graph.insertObjectWithId newSplitNode
+
+transpose :: Rank -> Rank -> Id -> BuildDagM Id
+transpose r0 r1 inn = do
+  rankInn <- getOutputRank inn
+  let trModes = map fix [0..(rankInn-1)]
+      fix r | r == r0 = r1
+      fix r | r == r1 = r0
+      fix r           = r
+  if r0 >= rankInn || r1 >= rankInn || r0 == r1
+     then error "invalid transpose"
+     else elementwise NoOp trModes inn
+
+permute :: [Rank] -> Id -> BuildDagM Id
+permute outModes inn = do
+  rankInn <- getOutputRank inn
+  if length outModes /= rankInn || outModes == [0..(rankInn-1)]
+     then error "invalid permute"
+     else elementwise NoOp outModes inn
 
 --------------------------------------------------------------------------------
 

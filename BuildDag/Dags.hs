@@ -32,7 +32,8 @@ dagUsage = [
     "7matmul n",
     "ff nB nInn nOut nHidden",
     "bertPerturb batchSize numLayers nQuery nHead nSequence",
-    "bht batchSize nSequence nHidden nHead nHH",
+    "bht",
+    "bht numLayers batchSize nSequence nHidden nHead nHH",
     "exp which"
   ]
 
@@ -121,7 +122,17 @@ parseDagArgs "bertPerturb" (nBatchStr:nLayerStr:nQueryStr:nHeadStr:nSequenceStr:
 
   return $ (uncurry getDag) (Bert.bertPerturb nBatch params)
 
-parseDagArgs "bht" (nBatchStr:nSeqStr:nHiddenStr:nHeadStr:nHHStr:[]) = do
+parseDagArgs "bht" [] =
+  parseDagArgs "bht" (map show [nLayers,nB,nS,nH,nN,nHH])
+    where nLayers = 1
+          nH  = 12288
+          nN  = 96
+          nHH = 128
+          nB  = 4
+          nS  = 4096
+
+parseDagArgs "bht" (nLayersStr:nBatchStr:nSeqStr:nHiddenStr:nHeadStr:nHHStr:[]) = do
+  nLayers <- readInt       nLayersStr
   nBatch  <- readDimension nBatchStr
   nSeq    <- readDimension nSeqStr
   nHidden <- readDimension nHiddenStr
@@ -136,12 +147,13 @@ parseDagArgs "bht" (nBatchStr:nSeqStr:nHiddenStr:nHeadStr:nHHStr:[]) = do
           BHT._nHH = nHH
         }
 
-  return $ (uncurry getDag) (BHT.bht params)
+  return $ (uncurry getDag) (BHT.bht nLayers params)
 
 parseDagArgs "exp" (which:[]) = do
   w <- readInt which
   case w of
     1 -> return $ (uncurry getDag) (Exp.exp01)
+    2 -> return $ (uncurry getDag) (Exp.exp02)
     _ -> Nothing
 
 parseDagArgs _ _ = Nothing

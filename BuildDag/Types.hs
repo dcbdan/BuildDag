@@ -149,6 +149,8 @@ data UOp =
   | Sqrt
   | AddScalar Float
   | Dropout Float
+  | NoOp
+  | MulScalar Float
 
 instance Paramable UOp where
   paramable Sigmoid       = [Pi 0]
@@ -159,6 +161,8 @@ instance Paramable UOp where
   paramable Sqrt          = [Pi 5]
   paramable (AddScalar f) = [Pi 6, Pf f]
   paramable (Dropout f)   = [Pi 7, Pf f]
+  paramable NoOp          = [Pi 8]
+  paramable (MulScalar f) = [Pi 9, Pf f]
 
 instance Show UOp where
   show  Sigmoid      = "sigmoid"
@@ -169,6 +173,8 @@ instance Show UOp where
   show  Sqrt         = "sqrt"
   show (AddScalar _) = "addScalar"
   show (Dropout _)   = "dropout"
+  show NoOp          = "no-op"
+  show (MulScalar _) = "mulScalar"
 
 data Init =
     InitConstant Float
