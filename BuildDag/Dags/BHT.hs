@@ -142,11 +142,11 @@ compute (thisLayer:layers) x = do
   ------------------------- Eq ( 9)
   x_score_p <- lift $
     let alpha = (1.0 / (sqrt (fromIntegral nHH)))
-     in einsumAlpha "hh,s1,n,b|s2,hh,n,b|s2,s1,n,b" alpha xqpp xkppp
-  x_softmax <- lift $ softmax x_score_p -- [nS2,nS1,nN,nB]
+     in fBmm444_SS_Alpha alpha xqpp xkppp -- [s2,s1,n,b]
+  x_softmax <- lift $ softmax x_score_p   -- [nS2,nS1,nN,nB]
 
   ------------------------- Eq (11)
-  x_att    <- lift $ einsum "s2,s1,n,b|hh,s2,n,b|hh,s1,n,b" x_softmax xvpp
+  x_att    <- lift $ fBmm444_SS x_softmax xvpp  -- [hh,s1,n,b]
   x_att_p  <- lift $ transpose 1 2 x_att        -- [nHH,nN,nS,nB]
   x_att_pp <- lift $ merge x_att_p              -- [nH,nS,nB]
 
@@ -184,7 +184,21 @@ compute (thisLayer:layers) x = do
   g_x_att_pp <- lift $ einsum "nH1,nS,nB|nH1,nH2|nH2,nS,nB" g_x_out wo
 
   ------------------------- Eq (12)
+  g_x_att_p   <- lift $ split nHH g_x_att_pp         -- [nHH,nN,nS,nB]
+  g_x_att     <- lift $ transpose 1 2 g_x_att_p      -- [nHH,nS,nN,nB]
+  g_x_softmax <- lift $ fBmm444_ST g_x_att xvpp      -- [s2,s1,n,b]
+  g_x_v_pp    <- lift $ fBmm444_TS x_softmax g_x_att -- [hh,s2,n,b]
+
   ------------------------- Eq (10)
+  crossd      <- lift $ fBmm444_TS x_softmax x_softmax -- [s,s,n,b]
+  scrossd     <- lift $ elementwiseBinary Sub [0,1,2,3] [1,0,2,3] [0,1,2,3] x_softmax crossd
+                                                       -- [s,s,n,b]
+  g_x_score   <- lift $
+    let alpha = (1.0 / (sqrt (fromIntegral nHH)))
+     in fBmm444_SS_Alpha alpha g_x_softmax scrossd     -- [s,s,n,b]
+  g_x_q_pp  <- lift $ fBmm444_ST g_x_score xkppp              -- [hh,s,n,b]
+  g_x_k_ppp <- lift $ fBmm444_TT g_x_q_pp g_x_score           -- [hh,s,n,b]
+
   ------------------------- Eq ( 8)
   ------------------------- Eq ( 6)
   ------------------------- Eq ( 4)
@@ -226,4 +240,13 @@ softmax x = do
   out <- elementwiseBinary Div allR lstR allR ex de      -- ij
   return out
 
+fBmm444_SS_Alpha f = einsumAlpha "j,i,b2,b1|k,j,b2,b1|k,i,b2,b1" f
+fBmm444_TS_Alpha f = einsumAlpha "i,j,b2,b1|k,j,b2,b1|k,i,b2,b1" f
+fBmm444_ST_Alpha f = einsumAlpha "j,i,b2,b1|j,k,b2,b1|k,i,b2,b1" f
+fBmm444_TT_Alpha f = einsumAlpha "i,j,b2,b1|j,k,b2,b1|k,i,b2,b1" f
+
+fBmm444_SS = fBmm444_SS_Alpha 1.0
+fBmm444_TS = fBmm444_TS_Alpha 1.0
+fBmm444_ST = fBmm444_ST_Alpha 1.0
+fBmm444_TT = fBmm444_TT_Alpha 1.0
 
