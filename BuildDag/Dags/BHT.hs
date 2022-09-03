@@ -182,6 +182,7 @@ compute (thisLayer:layers) x = do
   let g_x_out = g_x_out_p -- [nH,nS,nB]
       g_x_4   = g_x_out_p -- [nH,nS,nB]
   g_x_att_pp <- lift $ einsum "nH1,nS,nB|nH1,nH2|nH2,nS,nB" g_x_out wo
+  g_wo       <- lift $ einsum "h1,s,b|h2,s,b|h2,h1" x_att_pp g_x_out
 
   ------------------------- Eq (12)
   g_x_att_p   <- lift $ split nHH g_x_att_pp         -- [nHH,nN,nS,nB]
@@ -200,15 +201,28 @@ compute (thisLayer:layers) x = do
   g_x_k_ppp <- lift $ fBmm444_TT g_x_q_pp g_x_score           -- [hh,s,n,b]
 
   ------------------------- Eq ( 8)
-  ------------------------- Eq ( 6)
-  ------------------------- Eq ( 4)
-  ------------------------- Eq ( 2)
+  g_x_v_p <- lift $ transpose 1 2 g_x_v_pp
+  g_x_v   <- lift $ merge g_x_v_p              -- [h,s,b]
+  g_x_3   <- lift $ fBmm323_ST g_x_v wv        -- [h,s,b]
+  g_wv    <- lift $ einsum "h1,s,b|h2,s,b|h2,h1" x g_x_v
 
-  g_wq <- undefined
-  g_wv <- undefined
-  g_wk <- undefined
-  g_wo <- undefined
-  g_x  <- undefined
+  ------------------------- Eq ( 6)
+  g_x_k_pp <- lift $ transpose 0 1 g_x_k_ppp
+  g_x_k_p  <- lift $ transpose 1 2 g_x_k_pp
+  g_x_k    <- lift $ merge g_x_k_p
+  g_x_2    <- lift $ fBmm323_ST g_x_k wk
+  g_wk     <- lift $ einsum "h1,s,b|h2,s,b|h2,h1" x g_x_k
+
+  ------------------------- Eq ( 4)
+  g_x_q_p <- lift $ transpose 1 2 g_x_q_pp
+  g_x_q   <- lift $ merge g_x_q_p
+  g_x_1   <- lift $ fBmm323_ST g_x_q wq
+  g_wq    <- lift $ einsum "h1,s,b|h2,s,b|h2,h1" x g_x_q
+
+  ------------------------- Eq ( 2)
+  g_x_t0 <- lift $ add g_x_1 g_x_2
+  g_x_t1 <- lift $ add g_x_3 g_x_4
+  g_x    <- lift $ add g_x_t0 g_x_t1
 
   -- DO THE GRADIENT STEP
   descentParam thisLayer "wq" g_wq
@@ -239,6 +253,11 @@ softmax x = do
   de  <- reduction CastableAdd  lstR ex                  -- j
   out <- elementwiseBinary Div allR lstR allR ex de      -- ij
   return out
+
+fBmm323_SS = einsum "j,i,b|k,j|k,i,b"
+fBmm323_TS = einsum "i,j,b|k,j|k,i,b"
+fBmm323_ST = einsum "j,i,b|j,k|k,i,b"
+fBmm323_TT = einsum "i,j,b|j,k|k,i,b"
 
 fBmm444_SS_Alpha f = einsumAlpha "j,i,b2,b1|k,j,b2,b1|k,i,b2,b1" f
 fBmm444_TS_Alpha f = einsumAlpha "i,j,b2,b1|k,j,b2,b1|k,i,b2,b1" f
