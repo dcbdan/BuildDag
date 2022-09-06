@@ -73,17 +73,14 @@ reductionAlpha op outModes alpha inn =
 
 elementwise a b d = elementwiseAlpha a b 1.0 d
 
--- Always do a reblock because _reblock makes sure the input isn't
--- a rogue merge. Downstream applications can do what they want with
--- the reblocks and merges--i.e. they should deal with ew-reblock-ew.
+-- Don't do a reblock for unary elementwise ops
 elementwiseAlpha :: UOp -> [Rank] -> Float -> Id -> BuildDagM Id
 elementwiseAlpha op outModes alpha inn =
   let joinKernel = KI_EW op outModes alpha
-   in do innReblock <- _reblock inn
-         rankIn <- getOutputRank innReblock
+   in do rankIn <- getOutputRank inn
          if rankIn /= length outModes
             then error "rankIn is incrrect size in EW"
-            else _join joinKernel [innReblock]
+            else _join joinKernel [inn]
 
 elementwiseBinary a b c d g h = elementwiseBinaryAlpha a b c d 1.0 g h
 
@@ -146,7 +143,7 @@ merge inn = do
   let newMergeNode out = Node out [inn] outDims (MergeSplit Nothing)
       outDims = case innDims of
                   (i:j:rest) -> (i*j:rest)
-  liftGraph $ Graph.insertObjectWithId newMergeNode
+  insertNodeWithId newMergeNode
 
 -- split |i| gives: k -> ij where |j| = |k|/|i|.
 split :: Dim -> Id -> BuildDagM Id
@@ -156,7 +153,7 @@ split i inn = do
   let newSplitNode out = Node out [inn] outDims (MergeSplit (Just i))
       outDims = case innDims of
                   (k:rest) | k `mod` i == 0 -> (i:(k `div` i):rest)
-  liftGraph $ Graph.insertObjectWithId newSplitNode
+  insertNodeWithId newSplitNode
 
 transpose :: Rank -> Rank -> Id -> BuildDagM Id
 transpose r0 r1 inn = do
@@ -215,56 +212,65 @@ _input name init = do
   dims <- case name `Map.lookup` lookupTable of
             Nothing -> error (name ++ "'s dimensions are not in the lookup table")
             Just dims -> return dims
-  liftGraph $ do
-    let newInputNode id = Node id [] dims (Input init)
-    Graph.insertObjectWithId newInputNode
+  let newInputNode id = Node id [] dims (Input init)
+  insertNodeWithId newInputNode
 
--- Invariants:
--- * every mergesplit and reblock must have one input and output
+-- for each inn, make sure that if the inn is a reblock or a merge,
+-- that adding this new node isn't gonna give the inn node too many outputs.
+--
+-- Trying to hold up these invariants:
+-- * every mergesplit and reblock must have one input and one output
 -- * there can be no [mergesplit or reblock] to [mergesplit or reblock] edges
+--
+-- A user could do x <- merge; y <- split x, in which case they'd break the
+-- invariants, oh well..
+_insertOpNode :: [Id] -> ([Id] -> Id -> Node) -> BuildDagM Id
+_insertOpNode inns genNewNode =
+  let fixInn inn = do
+        node <- getObject inn
+        if isReblockOrMergeSplit node
+           then fix inn node
+           else return inn
+      fix inn (Node _ [actualInn] innDims mr) = do
+         let newNode out = Node out [actualInn] innDims mr
+         numOutsAtInn <- liftGraph $ IntSet.size <$> Graph.getUps inn
+         case numOutsAtInn of
+           0 -> return inn
+           1 -> insertNodeWithId newNode
+           _ -> error "Too many outputs for a mergesplit or reblock node"
+   in do innsFixed <- mapM fixInn inns
+         insertNodeWithId (genNewNode innsFixed)
+
+insertNodeWithId :: (Id -> Node) -> BuildDagM Id
+insertNodeWithId newNode = liftGraph $ do
+  out <- Graph.insertObjectWithId newNode
+  inns <- _inns <$> Graph.getObject out
+  Graph.putDowns out (IntSet.fromList inns)
+  return out
+
 _reblock :: Id -> BuildDagM Id
 _reblock inn =
-  let -- In this case, the given node is either a reblock or a merge. However,
-      -- the invariant of one output might not be the case because mergesplit nodes
-      -- can be dangling with 0 ouptuts waiting to be assigned the one output...
-      fIsR (Node _ [actualInn] innDims ms@(MergeSplit _)) = do
-        let newMergeSplitNode out = Node out [actualInn] innDims ms
-        numOutsAtInn <- liftGraph $ IntSet.size <$> Graph.getUps inn
-        case numOutsAtInn of
-          -- this is a rogue mergesplit node being correctly used
-          0 -> return inn
-          -- this is a mergesplit node that has already been used;
-          -- duplicate it getting another mergesplit node to use
-          1 -> liftGraph $ Graph.insertObjectWithId newMergeSplitNode
-          _ -> error "Too many outputs for a mergesplit node"
-      fIsR (Node _ _ _ Reblock) =
-        -- Assuming that the user did not create a rogue reblock node like one can do
-        -- with merge and split nodes.
-        error "calling _reblock with a reblock node is not allowed"
-
-      -- In this case, the given node needs a reblock attached to it's output
-      -- to use
-      fIsNotR = do
-        innDims <- getOutputDims inn
-        let newReblockNode out = Node out [inn] innDims Reblock
-        liftGraph $ Graph.insertObjectWithId newReblockNode
-   in do node <- getObject inn
-         if isReblockOrMergeSplit node
-            then fIsR node
-            else fIsNotR
+   let fIsNotR = do
+         innDims <- getOutputDims inn
+         let newReblockNode out = Node out [inn] innDims Reblock
+         insertNodeWithId newReblockNode
+    in do node <- getObject inn
+          if isReblockOrMergeSplit node
+             then return inn
+             else fIsNotR
 
 _agg :: CastableBOp -> Id -> BuildDagM Id
 _agg op inn = do
   dims <- getOutputDims inn
-  let newAggNode out = Node out [inn] dims (Agg op)
-  liftGraph $ Graph.insertObjectWithId newAggNode
+  let newAggNode is out = Node out is dims (Agg op)
+  _insertOpNode [inn] newAggNode
 
 _join :: Kernel -> [Id] -> BuildDagM Id
 _join kernel inns = do
   inputDims <- mapM getOutputDims inns
   let incDims = K.getIncidentDims kernel inputDims
-      newJoinNode out = Node out inns incDims (Join kernel)
-  liftGraph $ Graph.insertObjectWithId newJoinNode
+      newJoinNode is out = Node out is incDims (Join kernel)
+  _insertOpNode inns newJoinNode
 
 liftGraph :: DagM a -> BuildDagM a
 liftGraph doThis =
