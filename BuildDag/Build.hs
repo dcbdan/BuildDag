@@ -73,14 +73,17 @@ reductionAlpha op outModes alpha inn =
 
 elementwise a b d = elementwiseAlpha a b 1.0 d
 
--- This op does not do an input reblocking or a post aggregation.
+-- Always do a reblock because _reblock makes sure the input isn't
+-- a rogue merge. Downstream applications can do what they want with
+-- the reblocks and merges--i.e. they should deal with ew-reblock-ew.
 elementwiseAlpha :: UOp -> [Rank] -> Float -> Id -> BuildDagM Id
 elementwiseAlpha op outModes alpha inn =
   let joinKernel = KI_EW op outModes alpha
-   in do rankIn <- getOutputRank inn
+   in do innReblock <- _reblock inn
+         rankIn <- getOutputRank innReblock
          if rankIn /= length outModes
             then error "rankIn is incrrect size in EW"
-            else _join joinKernel [inn]
+            else _join joinKernel [innReblock]
 
 elementwiseBinary a b c d g h = elementwiseBinaryAlpha a b c d 1.0 g h
 
@@ -138,6 +141,7 @@ initFile name whichFile = _input name (InitFile whichFile)
 -- merge gives: ij->k where |k| = |i| * |j|.
 merge :: Id -> BuildDagM Id
 merge inn = do
+  assertNotMergeOrReblock inn
   innDims <- getOutputDims inn
   let newMergeNode out = Node out [inn] outDims (MergeSplit Nothing)
       outDims = case innDims of
@@ -147,6 +151,7 @@ merge inn = do
 -- split |i| gives: k -> ij where |j| = |k|/|i|.
 split :: Dim -> Id -> BuildDagM Id
 split i inn = do
+  assertNotMergeOrReblock inn
   innDims <- getOutputDims inn
   let newSplitNode out = Node out [inn] outDims (MergeSplit (Just i))
       outDims = case innDims of
@@ -304,3 +309,10 @@ isReblockOrMergeSplit = _info .> f
   where f Reblock        = True
         f (MergeSplit _) = True
         f _              = False
+
+assertNotMergeOrReblock :: Id -> BuildDagM ()
+assertNotMergeOrReblock id = do
+  node <- getObject id
+  if isReblockOrMergeSplit node
+     then error "this is a reblock or a mergesplit node"
+     else return ()
