@@ -30,7 +30,7 @@ import BuildDag.Types
 
 import qualified BuildDag.Kernel as K
 
-import BuildDag.Misc ( idxInterval )
+import BuildDag.Misc ( idxInterval, (.>) )
 import qualified BuildDag.Misc as Misc ( split )
 
 matmul :: Id -> Id -> BuildDagM Id
@@ -214,11 +214,39 @@ _input name init = do
     let newInputNode id = Node id [] dims (Input init)
     Graph.insertObjectWithId newInputNode
 
+-- Invariants:
+-- * every mergesplit and reblock must have one input and output
+-- * there can be no [mergesplit or reblock] to [mergesplit or reblock] edges
 _reblock :: Id -> BuildDagM Id
-_reblock inn = do
-  innDims <- getOutputDims inn
-  let newReblockNode out = Node out [inn] innDims Reblock
-  liftGraph $ Graph.insertObjectWithId newReblockNode
+_reblock inn =
+  let -- In this case, the given node is either a reblock or a merge. However,
+      -- the invariant of one output might not be the case because mergesplit nodes
+      -- can be dangling with 0 ouptuts waiting to be assigned the one output...
+      fIsR (Node _ [actualInn] innDims ms@(MergeSplit _)) = do
+        let newMergeSplitNode out = Node out [actualInn] innDims ms
+        numOutsAtInn <- liftGraph $ IntSet.size <$> Graph.getUps inn
+        case numOutsAtInn of
+          -- this is a rogue mergesplit node being correctly used
+          0 -> return inn
+          -- this is a mergesplit node that has already been used;
+          -- duplicate it getting another mergesplit node to use
+          1 -> liftGraph $ Graph.insertObjectWithId newMergeSplitNode
+          _ -> error "Too many outputs for a mergesplit node"
+      fIsR (Node _ _ _ Reblock) =
+        -- Assuming that the user did not create a rogue reblock node like one can do
+        -- with merge and split nodes.
+        error "calling _reblock with a reblock node is not allowed"
+
+      -- In this case, the given node needs a reblock attached to it's output
+      -- to use
+      fIsNotR = do
+        innDims <- getOutputDims inn
+        let newReblockNode out = Node out [inn] innDims Reblock
+        liftGraph $ Graph.insertObjectWithId newReblockNode
+   in do node <- getObject inn
+         if isReblockOrMergeSplit node
+            then fIsR node
+            else fIsNotR
 
 _agg :: CastableBOp -> Id -> BuildDagM Id
 _agg op inn = do
@@ -271,3 +299,8 @@ getOutputDims id = do
   aggd <- getAggRanks id
   return $ incToOut aggd incDims
 
+isReblockOrMergeSplit :: Node -> Bool
+isReblockOrMergeSplit = _info .> f
+  where f Reblock        = True
+        f (MergeSplit _) = True
+        f _              = False
