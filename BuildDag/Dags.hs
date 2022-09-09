@@ -32,8 +32,7 @@ dagUsage = [
     "7matmul n",
     "ff nB nInn nOut nHidden",
     "bertPerturb batchSize numLayers nQuery nHead nSequence",
-    "bht",
-    "bht numLayers batchSize nSequence nHidden nHead nHH",
+    "bht batchSize numLayers nQuery nHead nSequence",
     "exp which"
   ]
 
@@ -122,32 +121,40 @@ parseDagArgs "bertPerturb" (nBatchStr:nLayerStr:nQueryStr:nHeadStr:nSequenceStr:
 
   return $ (uncurry getDag) (Bert.bertPerturb nBatch params)
 
-parseDagArgs "bht" [] =
-  parseDagArgs "bht" (map show [nLayers,nB,nS,nH,nN,nHH])
-    where nLayers = 1
-          nH  = 12288
-          nN  = 96
-          nHH = 128
-          nB  = 4
-          nS  = 4096
+parseDagArgs "bht" sizes@(nBatchStr:nLayerStr:nQueryStr:nHeadStr:nSequenceStr:[]) = do
+  nBatch    <- readDimension nBatchStr
+  nLayer    <- readDimension nLayerStr
+  nQuery    <- readDimension nQueryStr
+  nHead     <- readDimension nHeadStr
+  nSequence <- readDimension nSequenceStr
 
-parseDagArgs "bht" (nLayersStr:nBatchStr:nSeqStr:nHiddenStr:nHeadStr:nHHStr:[]) = do
-  nLayers <- readInt       nLayersStr
-  nBatch  <- readDimension nBatchStr
-  nSeq    <- readDimension nSeqStr
-  nHidden <- readDimension nHiddenStr
-  nHead   <- readDimension nHeadStr
-  nHH     <- readDimension nHHStr
-
-  let params = BHT.Params {
-          BHT._nB  = nBatch,
-          BHT._nS  = nSeq,
-          BHT._nH  = nHidden,
-          BHT._nN  = nHead,
-          BHT._nHH = nHH
+  let bertParams = Bert.Params {
+          Bert._nLayer    = nLayer,
+          Bert._nQuery    = nQuery,
+          Bert._nHead     = nHead,
+          Bert._nSequence = nSequence,
+          Bert._fDropout  = (-1.0) -- no dropout
         }
+      bhtParams = bertParams2BHTParams nBatch bertParams
+  return $ (uncurry getDag) (BHT.bht nLayer bhtParams)
 
-  return $ (uncurry getDag) (BHT.bht nLayers params)
+--parseDagArgs "bht" (nLayersStr:nBatchStr:nSeqStr:nHiddenStr:nHeadStr:nHHStr:[]) = do
+--  nLayers <- readInt       nLayersStr
+--  nBatch  <- readDimension nBatchStr
+--  nSeq    <- readDimension nSeqStr
+--  nHidden <- readDimension nHiddenStr
+--  nHead   <- readDimension nHeadStr
+--  nHH     <- readDimension nHHStr
+--
+--  let params = BHT.Params {
+--          BHT._nB  = nBatch,
+--          BHT._nS  = nSeq,
+--          BHT._nH  = nHidden,
+--          BHT._nN  = nHead,
+--          BHT._nHH = nHH
+--        }
+--
+--  return $ (uncurry getDag) (BHT.bht nLayers params)
 
 parseDagArgs "exp" (which:[]) = do
   w <- readInt which
@@ -168,3 +175,14 @@ readInt = readDimension
 
 readFloat :: String -> Maybe Float
 readFloat = readMaybe
+
+bertParams2BHTParams :: Int -> Bert.Params -> BHT.Params
+bertParams2BHTParams nBatch (Bert.Params nLayer nQuery nHead nSequence _) =
+  let nEmbed = nHead * nQuery
+   in BHT.Params {
+        BHT._nB  = nBatch,
+        BHT._nS  = nSequence,
+        BHT._nH  = nEmbed,
+        BHT._nN  = nHead,
+        BHT._nHH = nQuery
+      }
